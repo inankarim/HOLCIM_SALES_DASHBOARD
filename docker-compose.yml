@@ -1,0 +1,66 @@
+version: "3.9"
+
+services:
+
+  db:
+    image: postgres:16-alpine
+    container_name: sales_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./Sales_Dashboard/src/config/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    networks:
+      - sales_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./Sales_Dashboard
+      dockerfile: Dockerfile
+    container_name: sales_backend
+    restart: always
+    environment:
+      PORT: 5001
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: 1d
+      NODE_ENV: production
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./Sales_Dashboard/uploads:/app/uploads
+    networks:
+      - sales_network
+
+  frontend:
+    build:
+      context: ./sales_dashboard_frontend/sales-dashboard
+      dockerfile: Dockerfile
+    container_name: sales_frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - sales_network
+
+volumes:
+  pgdata:
+
+networks:
+  sales_network:
+    driver: bridge

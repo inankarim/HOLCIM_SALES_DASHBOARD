@@ -9,12 +9,15 @@ import emailRoutes from "./routes/email";
 
 const app = express();
 const PORT = process.env.PORT || 5001;
-
+// Trust nginx proxy
+app.set("trust proxy", 1);
 app.use(helmet());
 
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
+  "http://localhost:80",
+  "http://localhost",
   process.env.FRONTEND_URL,
 ].filter(Boolean);
 
