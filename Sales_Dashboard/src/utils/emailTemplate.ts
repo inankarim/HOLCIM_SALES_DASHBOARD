@@ -421,19 +421,25 @@ export function buildDashboardEmail(data: {
     </div>
 
     <!-- ═══ 10. AREA PERFORMANCE CHART ═══ -->
+   <!-- ═══ 10. AREA PERFORMANCE CHART ═══ -->
     ${
       areaChart
         ? `
     <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
-      <div style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:12px">📍 Area Performance Chart</div>
-      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px;border:1px solid #e2e8f0">
-        <img
-          src="cid:${areaChart.name}"
-          alt="Area Performance Chart"
-          style="width:100%;min-width:560px;max-width:900px;height:auto;display:block;border-radius:8px"
-        />
+      <div style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:4px">📍 Area Performance Chart</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:12px;background:#eff6ff;padding:6px 10px;border-radius:6px;border:1px solid #bfdbfe">
+        👆 Swipe left/right to see full chart
       </div>
-      <span style="font-size:10px;color:#94a3b8;margin-top:6px;display:block;text-align:right">← Scroll horizontally if needed</span>
+      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px;border:1px solid #e2e8f0">
+        <div style="min-width:1000px">
+          <img
+            src="cid:${areaChart.name}"
+            alt="Area Performance Chart"
+            style="width:1000px;height:auto;display:block;border-radius:8px"
+          />
+        </div>
+      </div>
+      <span style="font-size:10px;color:#94a3b8;margin-top:6px;display:block;text-align:right">← Swipe left to see full chart</span>
     </div>`
         : ""
     }
