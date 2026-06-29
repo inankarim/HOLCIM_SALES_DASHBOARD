@@ -36,6 +36,8 @@ services:
       DB_NAME: ${DB_NAME}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: 1d
+      EMAIL_USER: inankarimchowdhury@gmail.com
+      EMAIL_PASS: ${EMAIL_PASS}
       NODE_ENV: production
     depends_on:
       db:
