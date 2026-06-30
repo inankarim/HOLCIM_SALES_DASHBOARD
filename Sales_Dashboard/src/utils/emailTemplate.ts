@@ -168,10 +168,13 @@ export function buildDashboardEmail(data: {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <meta name="supported-color-schemes" content="light">
   <title>Sales KPI Report — ${date}</title>
   <style>
     * { box-sizing: border-box; }
     body { margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif }
+    img { -ms-interpolation-mode:bicubic; }
 
     /* ---- chart card (single, consistent scroll container) ---- */
     .chart-card {
@@ -247,13 +250,52 @@ export function buildDashboardEmail(data: {
       border-radius:8px;
       letter-spacing:0.02em;
     }
+
+    /* ════════════════════════════════════════════════════════
+       RESPONSIVE / MOBILE STYLES
+       Most mail clients that matter on phones (Apple Mail,
+       Outlook iOS/Android, the Gmail app on iOS, Yahoo, etc.)
+       support @media queries, so we use them to reflow the
+       fixed-width table layouts into single columns below
+       640px instead of leaving everything tiny / squished.
+       ════════════════════════════════════════════════════════ */
+    @media screen and (max-width:640px) {
+      .email-container { padding:16px 10px !important; }
+      .email-header { padding:18px 16px !important; }
+      .header-title { font-size:18px !important; }
+      .header-table td { display:block !important; width:100% !important; text-align:left !important; }
+      .header-table .header-meta-cell { text-align:left !important; margin-top:12px; }
+      .header-table .header-meta-cell > div { margin-top:0 !important; }
+
+      /* KPI cards: 2-up grid instead of 4-up */
+      .kpi-cell {
+        display:inline-block !important;
+        width:48% !important;
+        vertical-align:top !important;
+        padding:4px !important;
+      }
+      .kpi-value { font-size:19px !important; }
+
+      /* Section cards get tighter padding on phones */
+      .section-card { padding:14px !important; }
+      .section-title { font-size:14px !important; }
+
+      /* Insight cards stack full-width */
+      .insight-cell { display:block !important; width:100% !important; padding:4px 0 !important; }
+
+      .chart-card { padding:14px !important; }
+    }
+
+    @media screen and (max-width:380px) {
+      .kpi-cell { width:100% !important; }
+    }
   </style>
 </head>
 <body>
 
   <!-- ═══ HEADER ═══ -->
-  <div style="background:linear-gradient(to right,#94C12E,#10BBE1,#1D4370);padding:24px 32px">
-    <table width="100%" cellpadding="0" cellspacing="0">
+  <div class="email-header" style="background:linear-gradient(to right,#94C12E,#10BBE1,#1D4370);padding:24px 32px">
+    <table class="header-table" width="100%" cellpadding="0" cellspacing="0">
       <tr>
         <td>
           <div style="background:rgba(255,255,255,0.2);display:inline-block;padding:8px 14px;border-radius:8px">
@@ -261,8 +303,8 @@ export function buildDashboardEmail(data: {
           </div>
           <div style="color:rgba(255,255,255,0.85);font-size:13px;margin-top:6px">Sales KPI &amp; MIS Dashboard</div>
         </td>
-        <td style="text-align:right">
-          <div style="color:white;font-size:22px;font-weight:700">Sales Report</div>
+        <td class="header-meta-cell" style="text-align:right">
+          <div class="header-title" style="color:white;font-size:22px;font-weight:700">Sales Report</div>
           <div style="color:rgba(255,255,255,0.85);font-size:13px">${date}</div>
           ${
             dashboardUrl
@@ -276,59 +318,59 @@ export function buildDashboardEmail(data: {
     </table>
   </div>
 
-  <div style="max-width:900px;margin:0 auto;padding:24px 16px">
+  <div class="email-container" style="max-width:900px;margin:0 auto;padding:24px 16px">
 
     <!-- ═══ 1. KPI CARDS ═══ -->
     <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px">
       <tr>
-        <td width="25%" style="padding:4px">
+        <td class="kpi-cell" width="25%" style="padding:4px">
           <div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0;border-left:4px solid #3b82f6">
             <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">Total Sales Volume</div>
-            <div style="font-size:24px;font-weight:700;color:#3b82f6;margin-top:4px">${formatNum(kpi?.total_sales)}</div>
+            <div class="kpi-value" style="font-size:24px;font-weight:700;color:#3b82f6;margin-top:4px">${formatNum(kpi?.total_sales)}</div>
           </div>
         </td>
-        <td width="25%" style="padding:4px">
+        <td class="kpi-cell" width="25%" style="padding:4px">
           <div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0;border-left:4px solid #06b6d4">
             <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">Total Customers</div>
-            <div style="font-size:24px;font-weight:700;color:#06b6d4;margin-top:4px">${kpi?.total_customers?.toLocaleString()}</div>
+            <div class="kpi-value" style="font-size:24px;font-weight:700;color:#06b6d4;margin-top:4px">${kpi?.total_customers?.toLocaleString()}</div>
           </div>
         </td>
-        <td width="25%" style="padding:4px">
+        <td class="kpi-cell" width="25%" style="padding:4px">
           <div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0;border-left:4px solid #f59e0b">
             <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">Total Territories</div>
-            <div style="font-size:24px;font-weight:700;color:#f59e0b;margin-top:4px">${kpi?.total_territories}</div>
+            <div class="kpi-value" style="font-size:24px;font-weight:700;color:#f59e0b;margin-top:4px">${kpi?.total_territories}</div>
           </div>
         </td>
-        <td width="25%" style="padding:4px">
+        <td class="kpi-cell" width="25%" style="padding:4px">
           <div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0;border-left:4px solid #8b5cf6">
             <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">Avg / Customer</div>
-            <div style="font-size:24px;font-weight:700;color:#8b5cf6;margin-top:4px">${formatNum(kpi?.avg_per_customer)}</div>
+            <div class="kpi-value" style="font-size:24px;font-weight:700;color:#8b5cf6;margin-top:4px">${formatNum(kpi?.avg_per_customer)}</div>
           </div>
         </td>
       </tr>
       <tr>
-        <td width="25%" style="padding:4px">
+        <td class="kpi-cell" width="25%" style="padding:4px">
           <div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0;border-left:4px solid #10b981">
             <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">Top Region</div>
             <div style="font-size:18px;font-weight:700;color:#10b981;margin-top:4px">${kpi?.top_region?.name}</div>
             <div style="font-size:11px;color:#64748b">${formatNum(kpi?.top_region?.value)}</div>
           </div>
         </td>
-        <td width="25%" style="padding:4px">
+        <td class="kpi-cell" width="25%" style="padding:4px">
           <div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0;border-left:4px solid #ef4444">
             <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">Lowest Region</div>
             <div style="font-size:18px;font-weight:700;color:#ef4444;margin-top:4px">${kpi?.lowest_region?.name}</div>
             <div style="font-size:11px;color:#64748b">${formatNum(kpi?.lowest_region?.value)}</div>
           </div>
         </td>
-        <td width="25%" style="padding:4px">
+        <td class="kpi-cell" width="25%" style="padding:4px">
           <div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0;border-left:4px solid #10b981">
             <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">Top Product</div>
             <div style="font-size:18px;font-weight:700;color:#10b981;margin-top:4px">${kpi?.top_product?.name}</div>
             <div style="font-size:11px;color:#64748b">${formatNum(kpi?.top_product?.value)}</div>
           </div>
         </td>
-        <td width="25%" style="padding:4px">
+        <td class="kpi-cell" width="25%" style="padding:4px">
           <div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0;border-left:4px solid #ef4444">
             <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">Lowest Product</div>
             <div style="font-size:18px;font-weight:700;color:#ef4444;margin-top:4px">${kpi?.lowest_product?.name}</div>
@@ -339,40 +381,40 @@ export function buildDashboardEmail(data: {
     </table>
 
     <!-- ═══ 2. EXECUTIVE INSIGHTS ═══ -->
-    <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
-      <div style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:16px">💡 Executive Insights</div>
+    <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
+      <div class="section-title" style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:16px">💡 Executive Insights</div>
       <table width="100%" cellpadding="0" cellspacing="0">
         <tr>
-          <td width="50%" style="padding:4px">
+          <td class="insight-cell" width="50%" style="padding:4px">
             <div style="background:#f0fdf4;border-radius:8px;padding:10px 14px;font-size:12px;color:#1e293b">
               ⭐ Best Region: <strong>${insights?.best_region?.name}</strong> — ${formatNum(insights?.best_region?.value)}
             </div>
           </td>
-          <td width="50%" style="padding:4px">
+          <td class="insight-cell" width="50%" style="padding:4px">
             <div style="background:#fef2f2;border-radius:8px;padding:10px 14px;font-size:12px;color:#1e293b">
               ⚠️ Weakest Territory: <strong>${insights?.weakest_territory?.name}</strong> — ${formatNum(insights?.weakest_territory?.value)}
             </div>
           </td>
         </tr>
         <tr>
-          <td width="50%" style="padding:4px">
+          <td class="insight-cell" width="50%" style="padding:4px">
             <div style="background:#eff6ff;border-radius:8px;padding:10px 14px;font-size:12px;color:#1e293b">
               📈 Top Customer: <strong>${insights?.top_customer?.name}</strong> — ${formatNum(insights?.top_customer?.value)}
             </div>
           </td>
-          <td width="50%" style="padding:4px">
+          <td class="insight-cell" width="50%" style="padding:4px">
             <div style="background:#fefce8;border-radius:8px;padding:10px 14px;font-size:12px;color:#1e293b">
               📉 Lowest Customer: <strong>${insights?.lowest_customer?.name}</strong> — ${formatNum(insights?.lowest_customer?.value)}
             </div>
           </td>
         </tr>
         <tr>
-          <td width="50%" style="padding:4px">
+          <td class="insight-cell" width="50%" style="padding:4px">
             <div style="background:#f0fdf4;border-radius:8px;padding:10px 14px;font-size:12px;color:#1e293b">
               🏆 Most Sold: <strong>${insights?.most_sold_product?.name}</strong> — ${formatNum(insights?.most_sold_product?.value)}
             </div>
           </td>
-          <td width="50%" style="padding:4px">
+          <td class="insight-cell" width="50%" style="padding:4px">
             <div style="background:#fef2f2;border-radius:8px;padding:10px 14px;font-size:12px;color:#1e293b">
               🔻 Least Sold: <strong>${insights?.least_sold_product?.name}</strong> — ${formatNum(insights?.least_sold_product?.value)}
             </div>
@@ -382,8 +424,8 @@ export function buildDashboardEmail(data: {
     </div>
 
     <!-- ═══ 3. REGION PERFORMANCE TABLE ═══ -->
-    <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:16px">
-      <div style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:4px">📊 Region Performance</div>
+    <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:16px">
+      <div class="section-title" style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:4px">📊 Region Performance</div>
       <div style="font-size:11px;color:#94a3b8;margin-bottom:12px">Swipe left to see all columns →</div>
       <div class="chart-scroll" style="border:none">
         <table cellpadding="0" cellspacing="0" style="min-width:700px;width:100%">
@@ -408,8 +450,8 @@ export function buildDashboardEmail(data: {
     ${renderChart(regionChart, { label: "Region Performance Chart" })}
 
     <!-- ═══ 5. PRODUCT MIX TABLE ═══ -->
-    <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:16px">
-      <div style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:12px">🥧 Product Mix</div>
+    <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:16px">
+      <div class="section-title" style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:12px">🥧 Product Mix</div>
       <div class="chart-scroll" style="border:none">
         <table cellpadding="0" cellspacing="0" style="width:100%;min-width:320px">
           <thead>
@@ -439,8 +481,8 @@ export function buildDashboardEmail(data: {
     })}
 
     <!-- ═══ 9. AREA PERFORMANCE TABLE ═══ -->
-    <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:16px">
-      <div style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:4px">📍 Area Performance</div>
+    <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:16px">
+      <div class="section-title" style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:4px">📍 Area Performance</div>
       <div style="font-size:11px;color:#94a3b8;margin-bottom:12px">Swipe left to see all columns →</div>
       <div class="chart-scroll" style="border:none">
         <table cellpadding="0" cellspacing="0" style="width:100%;min-width:420px">
@@ -474,8 +516,8 @@ export function buildDashboardEmail(data: {
     })}
 
     <!-- ═══ 12. DEEP INSIGHTS — BOTTOM PERFORMERS ═══ -->
-    <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
-      <div style="font-size:15px;font-weight:700;color:#dc2626;margin-bottom:16px">⚠️ Bottom Performers</div>
+    <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
+      <div class="section-title" style="font-size:15px;font-weight:700;color:#dc2626;margin-bottom:16px">⚠️ Bottom Performers</div>
 
       <div style="font-size:12px;font-weight:700;color:#dc2626;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;padding-bottom:4px;border-bottom:2px solid #fee2e2">Bottom 5 TSM / TSE</div>
       <div class="chart-scroll" style="border:none;margin-bottom:20px">
@@ -522,8 +564,8 @@ export function buildDashboardEmail(data: {
     </div>
 
     <!-- ═══ 13. TOP CUSTOMERS ═══ -->
-    <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
-      <div style="font-size:15px;font-weight:700;color:#16a34a;margin-bottom:16px">🏆 Top 5 Customers</div>
+    <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
+      <div class="section-title" style="font-size:15px;font-weight:700;color:#16a34a;margin-bottom:16px">🏆 Top 5 Customers</div>
       <div class="chart-scroll" style="border:none">
         <table cellpadding="0" cellspacing="0" style="width:100%;min-width:380px">
           <thead>

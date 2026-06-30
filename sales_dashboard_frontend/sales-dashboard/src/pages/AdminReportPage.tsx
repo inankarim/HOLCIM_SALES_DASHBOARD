@@ -43,14 +43,22 @@ export function AdminReportPage({ uploadDate, onBack, onEmailSent }: Props) {
             Report — {uploadDate}
           </span>
 
-          <Button
-            onClick={() => setShowChartEmailModal(true)}
-            size="sm"
-            className="flex items-center gap-1.5 sm:gap-2 shrink-0"
-          >
-            <ImageDown className="h-4 w-4" />
-            <span className="hidden sm:inline">Send Report</span>
-          </Button>
+          {/* Send Report only available on the Dashboard tab — Deep Insights
+              charts aren't captured/attached by EmailChartModal, so hide the
+              button there to avoid sending an email with no charts. */}
+          {activeTab === "dashboard" ? (
+            <Button
+              onClick={() => setShowChartEmailModal(true)}
+              size="sm"
+              className="flex items-center gap-1.5 sm:gap-2 shrink-0"
+            >
+              <ImageDown className="h-4 w-4" />
+              <span className="hidden sm:inline">Send Report</span>
+            </Button>
+          ) : (
+            // spacer keeps the title centered when the button is hidden
+            <div className="shrink-0 w-9 sm:w-[124px]" aria-hidden="true" />
+          )}
         </div>
 
         {/* Row 2: Tab switcher */}
@@ -124,7 +132,18 @@ export function AdminReportPage({ uploadDate, onBack, onEmailSent }: Props) {
       )}
 
       {/* Deep Insights tab */}
-      {activeTab === "deep" && <DeepInsightsPage filters={filters} />}
+      {activeTab === "deep" && (
+        <>
+          <div className="max-w-[1400px] mx-auto px-3 sm:px-4 pt-3 sm:pt-4">
+            <p className="text-xs sm:text-sm text-muted-foreground bg-muted/50 border rounded-lg px-3 py-2">
+              To email the report with charts attached, switch to the{" "}
+              <span className="font-medium text-foreground">Dashboard</span> tab
+              and use the <span className="font-medium text-foreground">Send Report</span> button.
+            </p>
+          </div>
+          <DeepInsightsPage filters={filters} />
+        </>
+      )}
 
       {/* Chart Email Modal */}
       {showChartEmailModal && (
