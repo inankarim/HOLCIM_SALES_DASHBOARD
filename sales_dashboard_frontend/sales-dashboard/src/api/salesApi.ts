@@ -13,6 +13,13 @@ export interface FilterParams {
   product?: string
 }
 
+export interface EmailRecipient {
+  id: number
+  email: string
+  label: string | null
+  created_at: string
+}
+
 export const salesApi = {
   // Get available dates
   getDates: () => http.get("/api/sales/dates"),
@@ -69,6 +76,16 @@ export const salesApi = {
     date: string
     charts?: { name: string; base64: string }[]
   }) => http.post("/api/email/send", payload),
+
+  // Saved email recipients (admin only)
+  getEmailRecipients: () =>
+    http.get<{ recipients: EmailRecipient[] }>("/api/email-recipients"),
+
+  addEmailRecipient: (email: string, label?: string) =>
+    http.post("/api/email-recipients", { email, label }),
+
+  deleteEmailRecipient: (id: number) =>
+    http.delete(`/api/email-recipients/${id}`),
 
   // Upload file
   // Upload file with security checks

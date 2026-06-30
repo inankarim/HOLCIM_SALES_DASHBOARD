@@ -6,7 +6,7 @@ import authRoutes from "./routes/auth";
 import uploadRoutes from "./routes/upload";
 import salesRoutes from "./routes/sales";
 import emailRoutes from "./routes/email";
-
+import emailRecipientRoutes from "./routes/emailRecipients";
 const app = express();
 const PORT = process.env.PORT || 5001;
 // Trust nginx proxy
@@ -70,6 +70,11 @@ const emailLimiter = rateLimit({
   max: 10, // max 10 emails per hour
   message: { error: "Too many emails sent. Please try again later." },
 });
+const recipientLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  message: { error: "Too many requests, please try again later" },
+});
 
 app.use(globalLimiter);
 app.use(express.json({ limit: "20mb" }));
@@ -80,6 +85,8 @@ app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/upload", uploadLimiter, uploadRoutes); // upload router internally uses POST /upload → now resolves to POST /api/upload/upload
 app.use("/api", salesLimiter, salesRoutes); // sales routes use /sales/* internally
 app.use("/api/email", emailLimiter, emailRoutes);
+app.use("/api/email-recipients", recipientLimiter, emailRecipientRoutes);
+
 app.get("/", (req, res) => {
   res.json({ message: "Sales Dashboard API running" });
 });

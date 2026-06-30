@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -14,6 +14,8 @@ import {
 import { captureChartAsBase64 } from "../../lib/exportPng";
 import DOMPurify from "dompurify";
 import type { FilterParams } from "../../api/salesApi";
+import { salesApi } from "../../api/salesApi";
+import type { EmailRecipient } from "../../api/salesApi";
 import http from "../../api/axios";
 
 // ─── Chart registry ──────────────────────────────────────────────────────────
@@ -98,6 +100,11 @@ export function EmailChartModal({ open, onClose, onEmailSent, filters }: Props) 
   const [errorMsg, setErrorMsg]   = useState("");
   const [sentCount, setSentCount] = useState(0);
 
+  // ── Saved email recipients ───────────────────────────────────────────────
+  const [savedRecipients, setSavedRecipients] = useState<EmailRecipient[]>([]);
+  const [saveThisEmail, setSaveThisEmail] = useState(false);
+  const [recipientsLoading, setRecipientsLoading] = useState(true);
+
   const [chartStates, setChartStates] = useState<ChartState[]>(
     CHART_JOBS.map((j) => ({
       id: j.id,
@@ -108,6 +115,18 @@ export function EmailChartModal({ open, onClose, onEmailSent, filters }: Props) 
   );
 
   const isBusy = status === "capturing" || status === "sending";
+
+  // ── Fetch saved recipients when modal opens ──────────────────────────────
+
+  useEffect(() => {
+    if (!open) return;
+    setRecipientsLoading(true);
+    salesApi
+      .getEmailRecipients()
+      .then((res) => setSavedRecipients(res.data.recipients))
+      .catch(console.error)
+      .finally(() => setRecipientsLoading(false));
+  }, [open]);
 
   // ── To field handlers ─────────────────────────────────────────────────────
 
@@ -237,6 +256,17 @@ export function EmailChartModal({ open, onClose, onEmailSent, filters }: Props) 
       setProgressMsg("Email sent successfully!");
       setStatus("done");
 
+      // Save recipients if checkbox was checked — fire and forget
+      if (saveThisEmail && toList.length > 0) {
+        Promise.all(
+          toList.map((email) =>
+            salesApi.addEmailRecipient(email).catch((err) =>
+              console.error("Failed to save recipient", email, err)
+            )
+          )
+        );
+      }
+
       // Wait 1.5s so user sees the success state, then trigger navigation
       setTimeout(() => {
         onEmailSent();
@@ -323,6 +353,50 @@ export function EmailChartModal({ open, onClose, onEmailSent, filters }: Props) 
               )}
             </div>
 
+            {/* Saved recipients quick-select */}
+            {!recipientsLoading && savedRecipients.length > 0 && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Saved Recipients</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {savedRecipients.map((r) => (
+                    <div
+                      key={r.id}
+                      className="group flex items-center gap-1 rounded-full border bg-muted/40 pl-2.5 pr-1 py-1 text-xs"
+                    >
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => {
+                          if (!toList.includes(r.email)) {
+                            setToList((prev) => [...prev, r.email]);
+                          }
+                        }}
+                        className="hover:text-primary"
+                      >
+                        {r.label || r.email}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={async () => {
+                          try {
+                            await salesApi.deleteEmailRecipient(r.id);
+                            setSavedRecipients((prev) => prev.filter((x) => x.id !== r.id));
+                          } catch (err) {
+                            console.error("Failed to delete recipient", err);
+                          }
+                        }}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity rounded-full hover:bg-destructive/10 p-0.5"
+                        title="Remove saved recipient"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* CC */}
             <div className="space-y-1.5">
               <Label htmlFor="chart-email-cc">CC (optional)</Label>
@@ -339,6 +413,20 @@ export function EmailChartModal({ open, onClose, onEmailSent, filters }: Props) 
                 <p className="text-xs text-destructive">{ccError}</p>
               )}
             </div>
+
+            {/* Save recipients checkbox */}
+            {toList.length > 0 && (
+              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={saveThisEmail}
+                  onChange={(e) => setSaveThisEmail(e.target.checked)}
+                  disabled={isBusy}
+                  className="h-3.5 w-3.5 rounded accent-primary"
+                />
+                Save these recipients for next time
+              </label>
+            )}
           </div>
 
           {/* ── Info banner (idle) ────────────────────────────────────────── */}

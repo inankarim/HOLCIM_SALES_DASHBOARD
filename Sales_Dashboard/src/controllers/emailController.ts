@@ -283,7 +283,8 @@ export const sendDashboardEmail = async (
       })),
       byProduct: products,
       deepInsights,
-      charts: charts || [], // ← pass charts from frontend
+      charts: charts || [],
+      dashboardUrl: process.env.FRONTEND_URL, // ← pass charts from frontend
     });
 
     // Build nodemailer attachments with cid: so they embed inline in the email

@@ -6,6 +6,7 @@ export function buildDashboardEmail(data: {
   byProduct: any[];
   deepInsights: any;
   charts?: { name: string; base64: string }[];
+  dashboardUrl?: string;
 }): string {
   const {
     date,
@@ -15,6 +16,7 @@ export function buildDashboardEmail(data: {
     byProduct,
     deepInsights,
     charts = [],
+    dashboardUrl,
   } = data;
 
   const formatNum = (val: number): string => {
@@ -28,25 +30,39 @@ export function buildDashboardEmail(data: {
   const getChart = (keyword: string) =>
     charts.find((c) => c.name.toLowerCase().includes(keyword.toLowerCase()));
 
+  /**
+   * Renders a single chart card.
+   *
+   * Design notes (fixes applied):
+   * - Exactly ONE scroll container per chart (no nested overflow divs) — this
+   *   was the cause of the double-scrollbar bug.
+   * - Images default to width:100% / height:auto so they fit the card and
+   *   are NOT artificially zoomed in. A scrollbar only appears if the chart
+   *   has a genuinely wide natural size (set via `wide: true`), and even
+   *   then the min-width is modest (640px) instead of the old 800–1000px,
+   *   so it doesn't look blown up.
+   * - `touch-action: pan-x pinch-zoom` lets people pinch-to-zoom on mobile
+   *   without fighting the scroll container.
+   */
   const renderChart = (
     chart: { name: string; base64: string } | undefined,
-    label?: string,
+    opts?: { label?: string; emoji?: string; wide?: boolean; hint?: string },
   ) => {
     if (!chart) return "";
-    const title = label || chart.name.replace(/-/g, " ").replace(/_/g, " ");
+    const { label, emoji = "📈", wide = false, hint } = opts || {};
+    const title = label || chart.name.replace(/[-_]/g, " ");
+
     return `
-    <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
-      <div style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.04em">📈 ${title}</div>
-      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px;border:1px solid #e2e8f0">
-        <div style="min-width:560px">
-          <img
-            src="cid:${chart.name}"
-            alt="${title}"
-            style="width:100%;min-width:560px;max-width:900px;height:auto;display:block;border-radius:8px"
-          />
-        </div>
+    <div class="chart-card">
+      <div class="chart-title">${emoji} ${title}</div>
+      ${hint ? `<div class="chart-hint">${hint}</div>` : ""}
+      <div class="chart-scroll">
+        <img
+          src="cid:${chart.name}"
+          alt="${title}"
+          class="${wide ? "chart-img chart-img--wide" : "chart-img"}"
+        />
       </div>
-      <div style="font-size:10px;color:#94a3b8;margin-top:6px;text-align:right">← Scroll horizontally if needed</div>
     </div>`;
   };
 
@@ -125,6 +141,18 @@ export function buildDashboardEmail(data: {
     )
     .join("");
 
+  const areaRows = (deepInsights?.failures?.bottom5_territories || [])
+    .map(
+      (r: any, i: number) => `
+      <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"}">
+        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;white-space:nowrap">${r.territory}</td>
+        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;white-space:nowrap">${r.region}</td>
+        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:center">${r.customers}</td>
+        <td style="padding:10px 14px;font-size:13px;font-weight:700;color:#1d4370;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${formatNum(Number(r.total))}</td>
+      </tr>`,
+    )
+    .join("");
+
   // Chart lookups — adjust keywords to match your actual chart names
   const regionChart = getChart("region");
   const productPieChart =
@@ -144,7 +172,81 @@ export function buildDashboardEmail(data: {
   <style>
     * { box-sizing: border-box; }
     body { margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif }
-    .scroll-hint { font-size:10px;color:#94a3b8;margin-top:6px;text-align:right;display:block }
+
+    /* ---- chart card (single, consistent scroll container) ---- */
+    .chart-card {
+      background:white;
+      border-radius:12px;
+      border:1px solid #e2e8f0;
+      padding:20px;
+      margin-bottom:24px;
+      box-shadow:0 1px 2px rgba(15,23,42,0.04);
+    }
+    .chart-title {
+      font-size:14px;
+      font-weight:700;
+      color:#1e293b;
+      margin-bottom:10px;
+    }
+    .chart-hint {
+      font-size:11px;
+      color:#64748b;
+      background:#eff6ff;
+      border:1px solid #bfdbfe;
+      border-radius:6px;
+      padding:6px 10px;
+      margin-bottom:12px;
+    }
+    /* the ONE and only scroll container per chart */
+    .chart-scroll {
+      overflow-x:auto;
+      overflow-y:hidden;
+      -webkit-overflow-scrolling:touch;
+      scrollbar-width:thin;
+      scrollbar-color:#cbd5e1 transparent;
+      border-radius:8px;
+      border:1px solid #e2e8f0;
+      touch-action:pan-x pinch-zoom;
+    }
+    .chart-scroll::-webkit-scrollbar { height:8px; }
+    .chart-scroll::-webkit-scrollbar-track { background:transparent; }
+    .chart-scroll::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:8px; }
+    .chart-scroll::-webkit-scrollbar-thumb:hover { background:#94a3b8; }
+
+    /* default: image simply fits the card, no forced zoom */
+    .chart-img {
+      display:block;
+      width:100%;
+      max-width:100%;
+      height:auto;
+      border-radius:8px;
+    }
+    /* wide charts (heatmap / ranking) get a sane, modest min-width
+       instead of the old 800–1000px "zoomed in" sizing */
+    .chart-img--wide {
+      width:auto;
+      min-width:100%;
+      max-width:none;
+      height:auto;
+    }
+    @media (max-width:639px) {
+      .chart-img--wide { min-width:640px; }
+    }
+
+    table { border-collapse:collapse; }
+
+    /* ---- dashboard CTA button ---- */
+    .dashboard-btn {
+      display:inline-block;
+      background:#1D4370;
+      color:#ffffff !important;
+      font-size:13px;
+      font-weight:600;
+      text-decoration:none;
+      padding:10px 20px;
+      border-radius:8px;
+      letter-spacing:0.02em;
+    }
   </style>
 </head>
 <body>
@@ -162,6 +264,13 @@ export function buildDashboardEmail(data: {
         <td style="text-align:right">
           <div style="color:white;font-size:22px;font-weight:700">Sales Report</div>
           <div style="color:rgba(255,255,255,0.85);font-size:13px">${date}</div>
+          ${
+            dashboardUrl
+              ? `<div style="margin-top:10px">
+            <a href="${dashboardUrl}" class="dashboard-btn" target="_blank" rel="noopener noreferrer">View Full Dashboard →</a>
+          </div>`
+              : ""
+          }
         </td>
       </tr>
     </table>
@@ -276,8 +385,8 @@ export function buildDashboardEmail(data: {
     <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:16px">
       <div style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:4px">📊 Region Performance</div>
       <div style="font-size:11px;color:#94a3b8;margin-bottom:12px">Swipe left to see all columns →</div>
-      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;min-width:700px;width:100%">
+      <div class="chart-scroll" style="border:none">
+        <table cellpadding="0" cellspacing="0" style="min-width:700px;width:100%">
           <thead>
             <tr style="background:linear-gradient(to right,#94C12E,#10BBE1,#1D4370)">
               <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:left;white-space:nowrap">Region</th>
@@ -296,28 +405,13 @@ export function buildDashboardEmail(data: {
     </div>
 
     <!-- ═══ 4. REGION PERFORMANCE CHART ═══ -->
-    ${
-      regionChart
-        ? `
-    <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
-      <div style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:12px">📈 Region Performance Chart</div>
-      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px;border:1px solid #e2e8f0">
-        <img
-          src="cid:${regionChart.name}"
-          alt="Region Performance Chart"
-          style="width:100%;min-width:560px;max-width:900px;height:auto;display:block;border-radius:8px"
-        />
-      </div>
-      <span style="font-size:10px;color:#94a3b8;margin-top:6px;display:block;text-align:right">← Scroll horizontally if needed</span>
-    </div>`
-        : ""
-    }
+    ${renderChart(regionChart, { label: "Region Performance Chart" })}
 
     <!-- ═══ 5. PRODUCT MIX TABLE ═══ -->
     <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:16px">
       <div style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:12px">🥧 Product Mix</div>
-      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;min-width:320px">
+      <div class="chart-scroll" style="border:none">
+        <table cellpadding="0" cellspacing="0" style="width:100%;min-width:320px">
           <thead>
             <tr style="background:linear-gradient(to right,#94C12E,#10BBE1,#1D4370)">
               <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:left;white-space:nowrap">Product</th>
@@ -331,70 +425,25 @@ export function buildDashboardEmail(data: {
     </div>
 
     <!-- ═══ 6. PRODUCT MIX PIE CHART ═══ -->
-    ${
-      productPieChart
-        ? `
-    <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
-      <div style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:12px">🥧 Product Mix Chart</div>
-      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px;border:1px solid #e2e8f0">
-        <img
-          src="cid:${productPieChart.name}"
-          alt="Product Mix Chart"
-          style="width:100%;min-width:400px;max-width:900px;height:auto;display:block;border-radius:8px"
-        />
-      </div>
-      <span style="font-size:10px;color:#94a3b8;margin-top:6px;display:block;text-align:right">← Scroll horizontally if needed</span>
-    </div>`
-        : ""
-    }
+    ${renderChart(productPieChart, { label: "Product Mix Chart", emoji: "🥧" })}
 
-    <!-- ═══ 7. PRODUCT COMPARISON TABLE ═══ -->
-    ${
-      productCompChart
-        ? `
-    <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:16px">
-      <div style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:12px">📊 Product Comparison</div>
-      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px;border:1px solid #e2e8f0">
-        <img
-          src="cid:${productCompChart.name}"
-          alt="Product Comparison"
-          style="width:100%;min-width:560px;max-width:900px;height:auto;display:block;border-radius:8px"
-        />
-      </div>
-      <span style="font-size:10px;color:#94a3b8;margin-top:6px;display:block;text-align:right">← Scroll horizontally if needed</span>
-    </div>`
-        : ""
-    }
+    <!-- ═══ 7. PRODUCT COMPARISON CHART ═══ -->
+    ${renderChart(productCompChart, { label: "Product Comparison" })}
 
-    <!-- ═══ 8. HEATMAP (horizontal scroll / swipe) ═══ -->
-    ${
-      heatmapChart
-        ? `
-    <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
-      <div style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:4px">🔥 Territory Heatmap</div>
-      <div style="font-size:11px;color:#64748b;margin-bottom:12px;background:#fefce8;padding:6px 10px;border-radius:6px;border:1px solid #fde68a">
-        👆 Swipe left / right to explore the full heatmap
-      </div>
-      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px;border:1px solid #e2e8f0">
-        <div style="min-width:800px">
-          <img
-            src="cid:${heatmapChart.name}"
-            alt="Territory Heatmap"
-            style="width:100%;min-width:800px;height:auto;display:block;border-radius:8px"
-          />
-        </div>
-      </div>
-      <span style="font-size:10px;color:#94a3b8;margin-top:6px;display:block;text-align:right">← Swipe left to see full heatmap</span>
-    </div>`
-        : ""
-    }
+    <!-- ═══ 8. HEATMAP (only one scrollbar, modest zoom) ═══ -->
+    ${renderChart(heatmapChart, {
+      label: "Territory Heatmap",
+      emoji: "🔥",
+      wide: true,
+      hint: "👆 Swipe / pinch to explore the full heatmap",
+    })}
 
     <!-- ═══ 9. AREA PERFORMANCE TABLE ═══ -->
     <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:16px">
       <div style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:4px">📍 Area Performance</div>
       <div style="font-size:11px;color:#94a3b8;margin-bottom:12px">Swipe left to see all columns →</div>
-      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;min-width:420px">
+      <div class="chart-scroll" style="border:none">
+        <table cellpadding="0" cellspacing="0" style="width:100%;min-width:420px">
           <thead>
             <tr style="background:linear-gradient(to right,#94C12E,#10BBE1,#1D4370)">
               <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:left;white-space:nowrap">Territory</th>
@@ -403,77 +452,34 @@ export function buildDashboardEmail(data: {
               <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">Total Sales</th>
             </tr>
           </thead>
-          <tbody>
-            ${(deepInsights?.failures?.bottom5_territories || [])
-              .map(
-                (r: any, i: number) => `
-              <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"}">
-                <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;white-space:nowrap">${r.territory}</td>
-                <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;white-space:nowrap">${r.region}</td>
-                <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:center">${r.customers}</td>
-                <td style="padding:10px 14px;font-size:13px;font-weight:700;color:#1d4370;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${formatNum(Number(r.total))}</td>
-              </tr>`,
-              )
-              .join("")}
-          </tbody>
+          <tbody>${areaRows}</tbody>
         </table>
       </div>
     </div>
 
     <!-- ═══ 10. AREA PERFORMANCE CHART ═══ -->
-   <!-- ═══ 10. AREA PERFORMANCE CHART ═══ -->
-    ${
-      areaChart
-        ? `
-    <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
-      <div style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:4px">📍 Area Performance Chart</div>
-      <div style="font-size:11px;color:#64748b;margin-bottom:12px;background:#eff6ff;padding:6px 10px;border-radius:6px;border:1px solid #bfdbfe">
-        👆 Swipe left/right to see full chart
-      </div>
-      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px;border:1px solid #e2e8f0">
-        <div style="min-width:1000px">
-          <img
-            src="cid:${areaChart.name}"
-            alt="Area Performance Chart"
-            style="width:1000px;height:auto;display:block;border-radius:8px"
-          />
-        </div>
-      </div>
-      <span style="font-size:10px;color:#94a3b8;margin-top:6px;display:block;text-align:right">← Swipe left to see full chart</span>
-    </div>`
-        : ""
-    }
+    ${renderChart(areaChart, {
+      label: "Area Performance Chart",
+      emoji: "📍",
+      wide: true,
+      hint: "👆 Swipe / pinch to see the full chart",
+    })}
 
-    <!-- ═══ 11. TERRITORY RANKING CHART (zoom / swipe) ═══ -->
-    ${
-      territoryChart
-        ? `
-    <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
-      <div style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:4px">🏅 Territory Ranking</div>
-      <div style="font-size:11px;color:#64748b;margin-bottom:12px;background:#eff6ff;padding:6px 10px;border-radius:6px;border:1px solid #bfdbfe">
-        👆 Swipe left/right to see all territories — chart is zoomed for clarity
-      </div>
-      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px;border:1px solid #e2e8f0">
-        <div style="min-width:1000px">
-          <img
-            src="cid:${territoryChart.name}"
-            alt="Territory Ranking Chart"
-            style="width:1000px;height:auto;display:block;border-radius:8px"
-          />
-        </div>
-      </div>
-      <span style="font-size:10px;color:#94a3b8;margin-top:6px;display:block;text-align:right">← Swipe left to see full ranking</span>
-    </div>`
-        : ""
-    }
+    <!-- ═══ 11. TERRITORY RANKING CHART ═══ -->
+    ${renderChart(territoryChart, {
+      label: "Territory Ranking",
+      emoji: "🏅",
+      wide: true,
+      hint: "👆 Swipe / pinch to see all territories",
+    })}
 
     <!-- ═══ 12. DEEP INSIGHTS — BOTTOM PERFORMERS ═══ -->
     <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
       <div style="font-size:15px;font-weight:700;color:#dc2626;margin-bottom:16px">⚠️ Bottom Performers</div>
 
       <div style="font-size:12px;font-weight:700;color:#dc2626;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;padding-bottom:4px;border-bottom:2px solid #fee2e2">Bottom 5 TSM / TSE</div>
-      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:20px">
-        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;min-width:320px">
+      <div class="chart-scroll" style="border:none;margin-bottom:20px">
+        <table cellpadding="0" cellspacing="0" style="width:100%;min-width:320px">
           <thead>
             <tr style="background:#fef2f2">
               <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#dc2626;text-align:left;border-bottom:1px solid #fee2e2">TSM/TSE</th>
@@ -486,8 +492,8 @@ export function buildDashboardEmail(data: {
       </div>
 
       <div style="font-size:12px;font-weight:700;color:#dc2626;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;padding-bottom:4px;border-bottom:2px solid #fee2e2">Bottom 5 ASM / KAM</div>
-      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:20px">
-        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;min-width:320px">
+      <div class="chart-scroll" style="border:none;margin-bottom:20px">
+        <table cellpadding="0" cellspacing="0" style="width:100%;min-width:320px">
           <thead>
             <tr style="background:#fef2f2">
               <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#dc2626;text-align:left;border-bottom:1px solid #fee2e2">ASM/KAM</th>
@@ -500,8 +506,8 @@ export function buildDashboardEmail(data: {
       </div>
 
       <div style="font-size:12px;font-weight:700;color:#dc2626;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;padding-bottom:4px;border-bottom:2px solid #fee2e2">Bottom 5 Territories</div>
-      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;min-width:380px">
+      <div class="chart-scroll" style="border:none">
+        <table cellpadding="0" cellspacing="0" style="width:100%;min-width:380px">
           <thead>
             <tr style="background:#fef2f2">
               <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#dc2626;text-align:left;border-bottom:1px solid #fee2e2">Territory</th>
@@ -518,8 +524,8 @@ export function buildDashboardEmail(data: {
     <!-- ═══ 13. TOP CUSTOMERS ═══ -->
     <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
       <div style="font-size:15px;font-weight:700;color:#16a34a;margin-bottom:16px">🏆 Top 5 Customers</div>
-      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;min-width:380px">
+      <div class="chart-scroll" style="border:none">
+        <table cellpadding="0" cellspacing="0" style="width:100%;min-width:380px">
           <thead>
             <tr style="background:#f0fdf4">
               <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#16a34a;text-align:left;border-bottom:1px solid #bbf7d0;white-space:nowrap">Customer</th>

@@ -64,3 +64,14 @@ ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user', 'admin
 
 -- Index for role-based queries
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+
+CREATE TABLE email_recipients (
+  id SERIAL PRIMARY KEY,
+  admin_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  email VARCHAR(254) NOT NULL,
+  label VARCHAR(100),
+  created_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(admin_user_id, email)
+);
+
+CREATE INDEX idx_email_recipients_admin ON email_recipients(admin_user_id);
