@@ -43,6 +43,12 @@ export function buildDashboardEmail(data: {
    *   so it doesn't look blown up.
    * - `touch-action: pan-x pinch-zoom` lets people pinch-to-zoom on mobile
    *   without fighting the scroll container.
+   * - DESKTOP FIX: `.chart-img--wide` now scales to fit the card on
+   *   desktop (width:100%/max-width:100%) instead of forcing native
+   *   pixel width. The old "wide" (min-width:100%, max-width:none)
+   *   behavior only kicks back in inside a mobile-only media query,
+   *   so phones keep the pinch/scroll UX while desktop no longer
+   *   shows an oversized/clipped chart.
    */
   const renderChart = (
     chart: { name: string; base64: string } | undefined,
@@ -55,7 +61,7 @@ export function buildDashboardEmail(data: {
     return `
     <div class="chart-card">
       <div class="chart-title">${emoji} ${title}</div>
-      ${hint ? `<div class="chart-hint">${hint}</div>` : ""}
+      ${hint ? `<div class="chart-hint mobile-only-hint">${hint}</div>` : ""}
       <div class="chart-scroll">
         <img
           src="cid:${chart.name}"
@@ -200,6 +206,11 @@ export function buildDashboardEmail(data: {
       padding:6px 10px;
       margin-bottom:12px;
     }
+    /* Hint text like "swipe / pinch to explore" is only relevant once
+       the mobile media query below forces the wide-chart scroll
+       behavior, so hide it by default and only show it on phones. */
+    .mobile-only-hint { display:none; }
+
     /* the ONE and only scroll container per chart */
     .chart-scroll {
       overflow-x:auto;
@@ -224,16 +235,32 @@ export function buildDashboardEmail(data: {
       height:auto;
       border-radius:8px;
     }
-    /* wide charts (heatmap / ranking) get a sane, modest min-width
-       instead of the old 800–1000px "zoomed in" sizing */
+
+    /* DESKTOP DEFAULT: wide charts (heatmap / ranking / area) now scale
+       DOWN to fit the card's actual width, exactly like normal charts.
+       Previously this rule forced min-width:100% + max-width:none,
+       which locked the image to its native pixel size — on a roomy
+       desktop window that meant the chart rendered oversized and got
+       clipped/zoomed inside the card. This fixes that. */
     .chart-img--wide {
-      width:auto;
-      min-width:100%;
-      max-width:none;
+      display:block;
+      width:100%;
+      max-width:100%;
+      min-width:0;
       height:auto;
+      border-radius:8px;
     }
-    @media (max-width:639px) {
-      .chart-img--wide { min-width:640px; }
+
+    /* MOBILE ONLY: flip wide charts back to a fixed min-width so the
+       existing pinch/scroll UX on phones (which already looked right)
+       is preserved unchanged. */
+    @media screen and (max-width:640px) {
+      .chart-img--wide {
+        width:auto;
+        min-width:640px;
+        max-width:none;
+      }
+      .mobile-only-hint { display:block; }
     }
 
     table { border-collapse:collapse; }

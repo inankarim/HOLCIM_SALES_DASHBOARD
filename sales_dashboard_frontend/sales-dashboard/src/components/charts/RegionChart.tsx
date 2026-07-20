@@ -24,12 +24,12 @@ const COLORS = [
 
 // ✅ Fix 2: moved constants outside component so they aren't recreated on every render
 const PRODUCT_KEY_MAP: Record<string, string> = {
-  "PLC": "plc",
-  "PLC+": "plc_plus",
-  "POW": "pow",
-  "Holcim SS": "holcim_ss",
-  "HWP": "hwp",
-  "HCG": "hcg",
+  "PLC": "plc_mtd_sales",
+  "PLC+": "plc_plus_mtd_sales",
+  "POW": "powercrete_mtd_sales",
+  "Holcim SS": "pcc_opc_mtd_sales",
+  "HWP": "hwp_mtd_sales",
+  "HCG": "hcg_mtd_sales",
 };
 
 const PRODUCT_LABELS: Record<string, string> = {

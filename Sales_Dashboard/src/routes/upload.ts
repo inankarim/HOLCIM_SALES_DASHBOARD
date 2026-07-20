@@ -23,24 +23,26 @@ const storage = multer.diskStorage({
   },
 });
 
+// Only .xlsx now — the merge service (header auto-detection, SAP ID + Customer
+// Name join) is built for the raw distributor exports, which are always .xlsx.
+// CSV/XLS support from the old single-file flow is intentionally dropped.
 const fileFilter = (
   req: Request,
   file: Express.Multer.File,
   cb: multer.FileFilterCallback,
 ) => {
   const allowedMimes = [
-    "text/csv",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.ms-excel",
+    // Some browsers/Excel-on-Mac send this generic type for .xlsx — allow it
+    // since we still double-check the extension below.
+    "application/octet-stream",
   ];
-  const allowedExts = [".csv", ".xls", ".xlsx"];
-
   const ext = path.extname(file.originalname).toLowerCase();
 
   // Security: check both MIME type AND extension.
   // MIME alone can be spoofed by a client sending a malicious file with a fake Content-Type.
-  if (!allowedMimes.includes(file.mimetype) || !allowedExts.includes(ext)) {
-    return cb(new Error("Only .csv, .xls, and .xlsx files are allowed"));
+  if (!allowedMimes.includes(file.mimetype) || ext !== ".xlsx") {
+    return cb(new Error("Only .xlsx files are allowed"));
   }
 
   cb(null, true);
@@ -49,18 +51,33 @@ const fileFilter = (
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 70 * 1024 * 1024 },
 });
 
 const router = Router();
 
 // verifyToken  →  requireAdmin  →  multer  →  handler
-// A non-admin JWT is rejected before the file is even parsed
+// A non-admin JWT is rejected before either file is even read.
+// Admin uploads BOTH source files in one request: file_a (either the
+// Supercrete or Holcim export, in either order) and file_b (the other one).
+// The merge service figures out which is which by column fingerprint.
 router.post(
   "/",
   verifyToken,
   requireAdmin,
-  upload.single("file"),
+  (req, res, next) => {
+    upload.fields([
+      { name: "file_a", maxCount: 1 },
+      { name: "file_b", maxCount: 1 },
+    ])(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        return res.status(400).json({ error: `Upload error: ${err.message}` });
+      } else if (err) {
+        return res.status(400).json({ error: err.message });
+      }
+      next();
+    });
+  },
   handleUpload,
 );
 

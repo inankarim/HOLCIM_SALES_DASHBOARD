@@ -83,7 +83,7 @@ export function TerritoryChart({ filters }: Props) {
               <BarChart
                 data={data}
                 layout="vertical"
-                margin={{ left: 120, right: 20, top: 5, bottom: 5 }}
+                margin={{ left: 100, right: 20, top: 5, bottom: 5 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
@@ -95,8 +95,8 @@ export function TerritoryChart({ filters }: Props) {
                 <YAxis
                   type="category"
                   dataKey="name"
-                  fontSize={10}
-                  width={120}
+                  fontSize={9}
+                  width={100}
                   stroke="var(--muted-foreground)"
                 />
                 <Tooltip

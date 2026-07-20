@@ -7,14 +7,21 @@ import type { FilterParams } from "../../api/salesApi";
 import { exportChartToPng } from "../../lib/exportPng";
 
 
-const PRODUCTS = ["plc", "plc_plus", "pow", "holcim_ss", "hwp", "hcg"];
+const PRODUCTS = [
+  "plc_mtd_sales",
+  "plc_plus_mtd_sales",
+  "powercrete_mtd_sales",
+  "pcc_opc_mtd_sales",
+  "hwp_mtd_sales",
+  "hcg_mtd_sales",
+];
 const PRODUCT_LABELS: Record<string, string> = {
-  plc: "PLC",
-  plc_plus: "PLC+",
-  pow: "POW",
-  holcim_ss: "Holcim SS",
-  hwp: "HWP",
-  hcg: "HCG",
+  plc_mtd_sales: "PLC",
+  plc_plus_mtd_sales: "PLC+",
+  powercrete_mtd_sales: "POW",
+  pcc_opc_mtd_sales: "Holcim SS",
+  hwp_mtd_sales: "HWP",
+  hcg_mtd_sales: "HCG",
 };
 
 interface Props {

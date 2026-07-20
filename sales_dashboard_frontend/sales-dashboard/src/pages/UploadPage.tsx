@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useRef } from "react";
 import { salesApi } from "../api/salesApi";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -6,7 +6,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import {
   Upload, FileSpreadsheet, AlertCircle,
-  CheckCircle2, Calendar, BarChart3,
+  CheckCircle2, Calendar, BarChart3, Download,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -43,17 +43,115 @@ function Toast({
     </div>
   );
 }
+
+// ── decode the base64 merged workbook the backend returns and trigger a
+//    normal browser download — no extra request, no auth-header hassle ──────
+function downloadMergedFile(file: { filename: string; base64: string }) {
+  const byteChars = atob(file.base64);
+  const byteNumbers = new Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) {
+    byteNumbers[i] = byteChars.charCodeAt(i);
+  }
+  const byteArray = new Uint8Array(byteNumbers);
+  const blob = new Blob([byteArray], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = file.filename || "Sales_Summary.xlsx";
+  a.click();
+  URL.revokeObjectURL(url);
+}
 // ─────────────────────────────────────────────────────────────────────────────
 
+interface MergedFile {
+  filename: string;
+  base64: string;
+}
+
+// One small drop-zone component, used twice (once per source file) so the
+// two slots stay visually and behaviorally identical.
+function FileDropZone({
+  label,
+  hint,
+  file,
+  dragging,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onPick,
+  inputId,
+}: {
+  label: string;
+  hint: string;
+  file: File | null;
+  dragging: boolean;
+  onDragOver: (e: React.DragEvent) => void;
+  onDragLeave: () => void;
+  onDrop: (e: React.DragEvent) => void;
+  onPick: (f: File) => void;
+  inputId: string;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-sm font-medium">{label}</Label>
+      <div
+        className={`border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer ${
+          dragging
+            ? "border-primary bg-primary/5"
+            : "border-border hover:border-primary/50"
+        }`}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        onClick={() => document.getElementById(inputId)?.click()}
+      >
+        <div className="flex flex-col items-center gap-2">
+          <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
+            <Upload className="h-5 w-5 text-primary" />
+          </div>
+          {file ? (
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <FileSpreadsheet className="h-4 w-4 text-primary" />
+              {DOMPurify.sanitize(file.name).slice(0, 50)}
+            </div>
+          ) : (
+            <>
+              <p className="text-sm font-medium">Drop file here</p>
+              <p className="text-xs text-muted-foreground">{hint}</p>
+            </>
+          )}
+        </div>
+        <input
+          id={inputId}
+          type="file"
+          accept=".xlsx"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onPick(f);
+            e.target.value = "";
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function UploadPage() {
-  const [file, setFile] = useState<File | null>(null);
+  const [fileA, setFileA] = useState<File | null>(null);
+  const [fileB, setFileB] = useState<File | null>(null);
   const [uploadDate, setUploadDate] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<any | null>(null);
-  const [dragging, setDragging] = useState(false);
+  const [mergedFile, setMergedFile] = useState<MergedFile | null>(null);
+  const [draggingA, setDraggingA] = useState(false);
+  const [draggingB, setDraggingB] = useState(false);
   const [showOverwriteDialog, setShowOverwriteDialog] = useState(false);
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingFileA, setPendingFileA] = useState<File | null>(null);
+  const [pendingFileB, setPendingFileB] = useState<File | null>(null);
   const [pendingDate, setPendingDate] = useState("");
   const [showAdminReport, setShowAdminReport] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -74,23 +172,26 @@ export function UploadPage() {
     return false;
   };
 
-  const handleFile = useCallback((f: File) => {
-    setError(null);
-    setSuccess(null);
-    setFile(f);
-  }, []);
-
-  const performUpload = async (uploadFile: File, cleanDate: string) => {
+  const performUpload = async (uploadFileA: File, uploadFileB: File, cleanDate: string) => {
     setLoading(true);
     try {
-      const res = await salesApi.uploadFile(uploadFile, cleanDate);
+      const res = await salesApi.uploadFiles(uploadFileA, uploadFileB, cleanDate);
       const safeSuccess = {
         upload_date: DOMPurify.sanitize(String(res.data.upload_date ?? "")),
         rows_inserted: Number(res.data.rows_inserted ?? 0),
         months_archived: Number(res.data.months_archived ?? 0),
       };
       setSuccess(safeSuccess);
-      setFile(null);
+      if (res.data.file?.base64 && res.data.file?.filename) {
+        setMergedFile({
+          filename: DOMPurify.sanitize(String(res.data.file.filename)),
+          base64: String(res.data.file.base64),
+        });
+      } else {
+        setMergedFile(null);
+      }
+      setFileA(null);
+      setFileB(null);
       setUploadDate("");
     } catch (err: any) {
       const rawError = err.message || err.response?.data?.error || "Upload failed.";
@@ -109,8 +210,8 @@ export function UploadPage() {
       return;
     }
 
-    if (!file) {
-      setError("Please select a file.");
+    if (!fileA || !fileB) {
+      setError("Please select both files.");
       return;
     }
 
@@ -143,7 +244,8 @@ export function UploadPage() {
       const datesRes = await salesApi.getDates();
       const existingDates: string[] = datesRes.data.dates || [];
       if (existingDates.includes(cleanDate)) {
-        setPendingFile(file);
+        setPendingFileA(fileA);
+        setPendingFileB(fileB);
         setPendingDate(cleanDate);
         setShowOverwriteDialog(true);
         return;
@@ -152,14 +254,16 @@ export function UploadPage() {
       // If check fails proceed with upload
     }
 
-    await performUpload(file, cleanDate);
+    await performUpload(fileA, fileB, cleanDate);
   };
 
   // ── back from AdminReportPage with no email sent — just go back silently ──
   const handleBackFromReport = () => {
     setShowAdminReport(false);
     setSuccess(null);
-    setFile(null);
+    setMergedFile(null);
+    setFileA(null);
+    setFileB(null);
     setUploadDate("");
     setError(null);
     // no toast — user just pressed Back
@@ -169,7 +273,9 @@ export function UploadPage() {
   const handleEmailSent = () => {
     setShowAdminReport(false);
     setSuccess(null);
-    setFile(null);
+    setMergedFile(null);
+    setFileA(null);
+    setFileB(null);
     setUploadDate("");
     setError(null);
     setToast("Email sent successfully! Ready for the next upload.");
@@ -192,7 +298,7 @@ export function UploadPage() {
         <div className="mb-6 text-center">
           <h1 className="text-2xl font-bold">Upload Sales Data</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Upload a CSV or XLSX file with sales data
+            Upload both distributor sales files (.xlsx) — they'll be merged automatically
           </p>
         </div>
 
@@ -224,51 +330,40 @@ export function UploadPage() {
               />
             </div>
 
-            {/* Drop zone */}
-            <div
-              className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer ${
-                dragging
-                  ? "border-primary bg-primary/5"
-                  : "border-border hover:border-primary/50"
-              }`}
-              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragging(false);
-                const f = e.dataTransfer.files?.[0];
-                if (f) handleFile(f);
-              }}
-              onClick={() => document.getElementById("file-input")?.click()}
-            >
-              <div className="flex flex-col items-center gap-3">
-                <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <Upload className="h-6 w-6 text-primary" />
-                </div>
-                {file ? (
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <FileSpreadsheet className="h-4 w-4 text-primary" />
-                    {DOMPurify.sanitize(file.name).slice(0, 50)}
-                  </div>
-                ) : (
-                  <>
-                    <p className="text-sm font-medium">Drop your file here</p>
-                    <p className="text-xs text-muted-foreground">
-                      CSV or XLSX only, max 10MB
-                    </p>
-                  </>
-                )}
-              </div>
-              <input
-                id="file-input"
-                type="file"
-                accept=".csv,.xlsx"
-                hidden
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleFile(f);
-                  e.target.value = "";
+            {/* Two drop zones — either file can go in either slot, the
+                backend detects which is which by column fingerprint */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <FileDropZone
+                label="Supercrete Sales File"
+                hint="PLC / PLC+ / Powercrete — .xlsx"
+                file={fileA}
+                dragging={draggingA}
+                inputId="file-input-a"
+                onDragOver={(e) => { e.preventDefault(); setDraggingA(true); }}
+                onDragLeave={() => setDraggingA(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDraggingA(false);
+                  const f = e.dataTransfer.files?.[0];
+                  if (f) { setError(null); setSuccess(null); setFileA(f); }
                 }}
+                onPick={(f) => { setError(null); setSuccess(null); setFileA(f); }}
+              />
+              <FileDropZone
+                label="Holcim Sales File"
+                hint="PCC + OPC / HWP / HCG — .xlsx"
+                file={fileB}
+                dragging={draggingB}
+                inputId="file-input-b"
+                onDragOver={(e) => { e.preventDefault(); setDraggingB(true); }}
+                onDragLeave={() => setDraggingB(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDraggingB(false);
+                  const f = e.dataTransfer.files?.[0];
+                  if (f) { setError(null); setSuccess(null); setFileB(f); }
+                }}
+                onPick={(f) => { setError(null); setSuccess(null); setFileB(f); }}
               />
             </div>
 
@@ -297,11 +392,22 @@ export function UploadPage() {
             <div className="flex flex-col gap-2">
               <Button
                 onClick={handleSubmit}
-                disabled={loading || !file || !uploadDate}
+                disabled={loading || !fileA || !fileB || !uploadDate}
                 className="w-full"
               >
-                {loading ? "Uploading..." : "Upload File"}
+                {loading ? "Uploading & Merging..." : "Upload Files"}
               </Button>
+
+              {success && mergedFile && (
+                <Button
+                  variant="outline"
+                  className="w-full flex items-center gap-2"
+                  onClick={() => downloadMergedFile(mergedFile)}
+                >
+                  <Download className="h-4 w-4" />
+                  Download Merged Report (.xlsx)
+                </Button>
+              )}
 
               {success && (
                 <Button
@@ -338,7 +444,8 @@ export function UploadPage() {
               <AlertDialogCancel
                 onClick={() => {
                   setShowOverwriteDialog(false);
-                  setPendingFile(null);
+                  setPendingFileA(null);
+                  setPendingFileB(null);
                   setPendingDate("");
                 }}
               >
@@ -348,10 +455,11 @@ export function UploadPage() {
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 onClick={async () => {
                   setShowOverwriteDialog(false);
-                  if (pendingFile && pendingDate) {
-                    await performUpload(pendingFile, pendingDate);
+                  if (pendingFileA && pendingFileB && pendingDate) {
+                    await performUpload(pendingFileA, pendingFileB, pendingDate);
                   }
-                  setPendingFile(null);
+                  setPendingFileA(null);
+                  setPendingFileB(null);
                   setPendingDate("");
                 }}
               >

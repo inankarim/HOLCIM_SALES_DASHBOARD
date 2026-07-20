@@ -4,6 +4,7 @@ import {
   getKpi,
   getByRegion,
   getByProduct,
+  getMtdTargetByProduct,
   getRegionProductHeatmap,
   getByArea,
   getByTerritory,
@@ -30,6 +31,7 @@ router.get("/sales/kpi", getKpi);
 // Charts
 router.get("/sales/by-region", getByRegion);
 router.get("/sales/by-product", getByProduct);
+router.get("/sales/mtd-target-by-product", getMtdTargetByProduct);
 router.get("/sales/region-product-heatmap", getRegionProductHeatmap);
 router.get("/sales/by-area", getByArea);
 router.get("/sales/by-territory", getByTerritory);

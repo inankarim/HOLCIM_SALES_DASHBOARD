@@ -7,7 +7,14 @@ import { pool } from "../config/db";
 // If user passes ?start_date & ?end_date → use range
 // Default → latest available date in sales_current
 
-const PRODUCTS = ["plc", "plc_plus", "pow", "holcim_ss", "hwp", "hcg"];
+const PRODUCTS = [
+  "plc_mtd_sales",
+  "plc_plus_mtd_sales",
+  "powercrete_mtd_sales",
+  "pcc_opc_mtd_sales",
+  "hwp_mtd_sales",
+  "hcg_mtd_sales",
+];
 
 async function resolveDateFilter(query: any): Promise<{
   clause: string;
@@ -179,10 +186,10 @@ export const getKpi = async (
 
     const result = await pool.query(
       `SELECT
-        COALESCE(SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg), 0) AS total_sales,
+        COALESCE(SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales), 0) AS total_sales,
         COUNT(DISTINCT customer_name)                                    AS total_customers,
         COUNT(DISTINCT territory)                                        AS total_territories,
-        COALESCE(AVG(plc + plc_plus + pow + holcim_ss + hwp + hcg), 0) AS avg_per_customer
+        COALESCE(AVG(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales), 0) AS avg_per_customer
        FROM sales_current
        ${clause}${extra}`,
       allParams,
@@ -191,7 +198,7 @@ export const getKpi = async (
     // Top & lowest region
     const regionResult = await pool.query(
       `SELECT region,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
        FROM sales_current
        ${clause}${extra}
        GROUP BY region
@@ -202,12 +209,12 @@ export const getKpi = async (
     // Top & lowest product
     const productResult = await pool.query(
       `SELECT
-        SUM(plc)       AS plc,
-        SUM(plc_plus)  AS plc_plus,
-        SUM(pow)       AS pow,
-        SUM(holcim_ss) AS holcim_ss,
-        SUM(hwp)       AS hwp,
-        SUM(hcg)       AS hcg
+        SUM(plc_mtd_sales)       AS plc_mtd_sales,
+        SUM(plc_plus_mtd_sales)  AS plc_plus_mtd_sales,
+        SUM(powercrete_mtd_sales)       AS powercrete_mtd_sales,
+        SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
+        SUM(hwp_mtd_sales)       AS hwp_mtd_sales,
+        SUM(hcg_mtd_sales)       AS hcg_mtd_sales
        FROM sales_current
        ${clause}${extra}`,
       allParams,
@@ -216,12 +223,12 @@ export const getKpi = async (
     const regions = regionResult.rows;
     const products = productResult.rows[0];
     const productNameMap: Record<string, string> = {
-      plc: "PLC",
-      plc_plus: "PLC+",
-      pow: "POW",
-      holcim_ss: "Holcim SS",
-      hwp: "HWP",
-      hcg: "HCG",
+      plc_mtd_sales: "PLC",
+      plc_plus_mtd_sales: "PLC+",
+      powercrete_mtd_sales: "Powercrete",
+      pcc_opc_mtd_sales: "PCC + OPC",
+      hwp_mtd_sales: "HWP",
+      hcg_mtd_sales: "HCG",
     };
 
     const productEntries = Object.entries(products ?? {})
@@ -268,13 +275,13 @@ export const getByRegion = async (
     const result = await pool.query(
       `SELECT
         region,
-        SUM(plc)                                            AS plc,
-        SUM(plc_plus)                                       AS plc_plus,
-        SUM(pow)                                            AS pow,
-        SUM(holcim_ss)                                      AS holcim_ss,
-        SUM(hwp)                                            AS hwp,
-        SUM(hcg)                                            AS hcg,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg)  AS total
+        SUM(plc_mtd_sales)                                            AS plc_mtd_sales,
+        SUM(plc_plus_mtd_sales)                                       AS plc_plus_mtd_sales,
+        SUM(powercrete_mtd_sales)                                            AS powercrete_mtd_sales,
+        SUM(pcc_opc_mtd_sales)                                      AS pcc_opc_mtd_sales,
+        SUM(hwp_mtd_sales)                                            AS hwp_mtd_sales,
+        SUM(hcg_mtd_sales)                                            AS hcg_mtd_sales,
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales)  AS total
        FROM sales_current
        ${clause}${extra}
        GROUP BY region
@@ -286,12 +293,12 @@ export const getByRegion = async (
       date_used: defaultDate,
       data: result.rows.map((r) => ({
         region: r.region,
-        plc: Number(r.plc),
-        plc_plus: Number(r.plc_plus),
-        pow: Number(r.pow),
-        holcim_ss: Number(r.holcim_ss),
-        hwp: Number(r.hwp),
-        hcg: Number(r.hcg),
+        plc_mtd_sales: Number(r.plc_mtd_sales),
+        plc_plus_mtd_sales: Number(r.plc_plus_mtd_sales),
+        powercrete_mtd_sales: Number(r.powercrete_mtd_sales),
+        pcc_opc_mtd_sales: Number(r.pcc_opc_mtd_sales),
+        hwp_mtd_sales: Number(r.hwp_mtd_sales),
+        hcg_mtd_sales: Number(r.hcg_mtd_sales),
         total: Number(r.total),
       })),
     });
@@ -311,12 +318,12 @@ export const getByProduct = async (
 
     const result = await pool.query(
       `SELECT
-        SUM(plc)       AS plc,
-        SUM(plc_plus)  AS plc_plus,
-        SUM(pow)       AS pow,
-        SUM(holcim_ss) AS holcim_ss,
-        SUM(hwp)       AS hwp,
-        SUM(hcg)       AS hcg
+        SUM(plc_mtd_sales)       AS plc_mtd_sales,
+        SUM(plc_plus_mtd_sales)  AS plc_plus_mtd_sales,
+        SUM(powercrete_mtd_sales)       AS powercrete_mtd_sales,
+        SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
+        SUM(hwp_mtd_sales)       AS hwp_mtd_sales,
+        SUM(hcg_mtd_sales)       AS hcg_mtd_sales
        FROM sales_current
        ${clause}${extra}`,
       allParams,
@@ -324,20 +331,20 @@ export const getByProduct = async (
 
     const row = result.rows[0];
     const total =
-      Number(row.plc) +
-      Number(row.plc_plus) +
-      Number(row.pow) +
-      Number(row.holcim_ss) +
-      Number(row.hwp) +
-      Number(row.hcg);
+      Number(row.plc_mtd_sales) +
+      Number(row.plc_plus_mtd_sales) +
+      Number(row.powercrete_mtd_sales) +
+      Number(row.pcc_opc_mtd_sales) +
+      Number(row.hwp_mtd_sales) +
+      Number(row.hcg_mtd_sales);
 
     const products = [
-      { name: "PLC", value: Number(row.plc) },
-      { name: "PLC+", value: Number(row.plc_plus) },
-      { name: "POW", value: Number(row.pow) },
-      { name: "Holcim SS", value: Number(row.holcim_ss) },
-      { name: "HWP", value: Number(row.hwp) },
-      { name: "HCG", value: Number(row.hcg) },
+      { name: "PLC", value: Number(row.plc_mtd_sales) },
+      { name: "PLC+", value: Number(row.plc_plus_mtd_sales) },
+      { name: "Powercrete", value: Number(row.powercrete_mtd_sales) },
+      { name: "PCC + OPC", value: Number(row.pcc_opc_mtd_sales) },
+      { name: "HWP", value: Number(row.hwp_mtd_sales) },
+      { name: "HCG", value: Number(row.hcg_mtd_sales) },
     ].sort((a, b) => b.value - a.value);
 
     res.json({
@@ -353,6 +360,94 @@ export const getByProduct = async (
   }
 };
 
+// ─── GET /api/sales/mtd-target-by-product ─────────────────────────────────────
+// Same MTD scope as getByProduct above, but paired with each product's target
+// so the frontend can show achievement % without recomputing it client-side.
+const mtdPctOf = (numerator: number, denominator: number): number =>
+  denominator ? Number(((numerator / denominator) * 100).toFixed(2)) : 0;
+
+export const getMtdTargetByProduct = async (
+  req: AuthRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { clause, params, defaultDate } = await resolveDateFilter(req.query);
+    const { extra, params: allParams } = buildFilters(req.query, params);
+
+    const result = await pool.query(
+      `SELECT
+        SUM(plc_mtd_sales) AS plc_mtd_sales, SUM(plc_target) AS plc_target,
+        SUM(plc_plus_mtd_sales) AS plc_plus_mtd_sales, SUM(plc_plus_target) AS plc_plus_target,
+        SUM(powercrete_mtd_sales) AS powercrete_mtd_sales, SUM(powercrete_target) AS powercrete_target,
+        SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales, SUM(pcc_opc_target) AS pcc_opc_target,
+        SUM(hwp_mtd_sales) AS hwp_mtd_sales, SUM(hwp_target) AS hwp_target,
+        SUM(hcg_mtd_sales) AS hcg_mtd_sales, SUM(hcg_target) AS hcg_target
+       FROM sales_current
+       ${clause}${extra}`,
+      allParams,
+    );
+
+    const row = result.rows[0];
+    const products = [
+      {
+        key: "plc",
+        name: "PLC",
+        mtd_sales: Number(row.plc_mtd_sales),
+        target: Number(row.plc_target),
+      },
+      {
+        key: "plc_plus",
+        name: "PLC+",
+        mtd_sales: Number(row.plc_plus_mtd_sales),
+        target: Number(row.plc_plus_target),
+      },
+      {
+        key: "powercrete",
+        name: "Powercrete",
+        mtd_sales: Number(row.powercrete_mtd_sales),
+        target: Number(row.powercrete_target),
+      },
+      {
+        key: "pcc_opc",
+        name: "PCC + OPC",
+        mtd_sales: Number(row.pcc_opc_mtd_sales),
+        target: Number(row.pcc_opc_target),
+      },
+      {
+        key: "hwp",
+        name: "HWP",
+        mtd_sales: Number(row.hwp_mtd_sales),
+        target: Number(row.hwp_target),
+      },
+      {
+        key: "hcg",
+        name: "HCG",
+        mtd_sales: Number(row.hcg_mtd_sales),
+        target: Number(row.hcg_target),
+      },
+    ];
+
+    const totalMtdSales = products.reduce((s, p) => s + p.mtd_sales, 0);
+    const totalTarget = products.reduce((s, p) => s + p.target, 0);
+
+    res.json({
+      date_used: defaultDate,
+      total_mtd_sales: totalMtdSales,
+      total_target: totalTarget,
+      overall_achievement_pct: mtdPctOf(totalMtdSales, totalTarget),
+      // Worst achievement first — CEO's attention belongs on the laggards
+      data: products
+        .map((p) => ({
+          ...p,
+          achievement_pct: mtdPctOf(p.mtd_sales, p.target),
+        }))
+        .sort((a, b) => a.achievement_pct - b.achievement_pct),
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch MTD target data" });
+  }
+};
+
 // ─── GET /api/sales/region-product-heatmap ────────────────────────────────────
 export const getRegionProductHeatmap = async (
   req: AuthRequest,
@@ -365,13 +460,13 @@ export const getRegionProductHeatmap = async (
     const result = await pool.query(
       `SELECT
         region,
-        SUM(plc)       AS plc,
-        SUM(plc_plus)  AS plc_plus,
-        SUM(pow)       AS pow,
-        SUM(holcim_ss) AS holcim_ss,
-        SUM(hwp)       AS hwp,
-        SUM(hcg)       AS hcg,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales)       AS plc_mtd_sales,
+        SUM(plc_plus_mtd_sales)  AS plc_plus_mtd_sales,
+        SUM(powercrete_mtd_sales)       AS powercrete_mtd_sales,
+        SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
+        SUM(hwp_mtd_sales)       AS hwp_mtd_sales,
+        SUM(hcg_mtd_sales)       AS hcg_mtd_sales,
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
        FROM sales_current
        ${clause}${extra}
        GROUP BY region
@@ -383,12 +478,12 @@ export const getRegionProductHeatmap = async (
       date_used: defaultDate,
       data: result.rows.map((r) => ({
         region: r.region,
-        plc: Number(r.plc),
-        plc_plus: Number(r.plc_plus),
-        pow: Number(r.pow),
-        holcim_ss: Number(r.holcim_ss),
-        hwp: Number(r.hwp),
-        hcg: Number(r.hcg),
+        plc_mtd_sales: Number(r.plc_mtd_sales),
+        plc_plus_mtd_sales: Number(r.plc_plus_mtd_sales),
+        powercrete_mtd_sales: Number(r.powercrete_mtd_sales),
+        pcc_opc_mtd_sales: Number(r.pcc_opc_mtd_sales),
+        hwp_mtd_sales: Number(r.hwp_mtd_sales),
+        hcg_mtd_sales: Number(r.hcg_mtd_sales),
         total: Number(r.total),
       })),
     });
@@ -410,13 +505,13 @@ export const getByArea = async (
       `SELECT
         area,
         region,
-        SUM(plc)       AS plc,
-        SUM(plc_plus)  AS plc_plus,
-        SUM(pow)       AS pow,
-        SUM(holcim_ss) AS holcim_ss,
-        SUM(hwp)       AS hwp,
-        SUM(hcg)       AS hcg,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales)       AS plc_mtd_sales,
+        SUM(plc_plus_mtd_sales)  AS plc_plus_mtd_sales,
+        SUM(powercrete_mtd_sales)       AS powercrete_mtd_sales,
+        SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
+        SUM(hwp_mtd_sales)       AS hwp_mtd_sales,
+        SUM(hcg_mtd_sales)       AS hcg_mtd_sales,
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
        FROM sales_current
        ${clause}${extra}
        GROUP BY area, region
@@ -429,12 +524,12 @@ export const getByArea = async (
       data: result.rows.map((r) => ({
         area: r.area,
         region: r.region,
-        plc: Number(r.plc),
-        plc_plus: Number(r.plc_plus),
-        pow: Number(r.pow),
-        holcim_ss: Number(r.holcim_ss),
-        hwp: Number(r.hwp),
-        hcg: Number(r.hcg),
+        plc_mtd_sales: Number(r.plc_mtd_sales),
+        plc_plus_mtd_sales: Number(r.plc_plus_mtd_sales),
+        powercrete_mtd_sales: Number(r.powercrete_mtd_sales),
+        pcc_opc_mtd_sales: Number(r.pcc_opc_mtd_sales),
+        hwp_mtd_sales: Number(r.hwp_mtd_sales),
+        hcg_mtd_sales: Number(r.hcg_mtd_sales),
         total: Number(r.total),
       })),
     });
@@ -457,13 +552,13 @@ export const getByTerritory = async (
         territory,
         region,
         area,
-        SUM(plc)       AS plc,
-        SUM(plc_plus)  AS plc_plus,
-        SUM(pow)       AS pow,
-        SUM(holcim_ss) AS holcim_ss,
-        SUM(hwp)       AS hwp,
-        SUM(hcg)       AS hcg,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales)       AS plc_mtd_sales,
+        SUM(plc_plus_mtd_sales)  AS plc_plus_mtd_sales,
+        SUM(powercrete_mtd_sales)       AS powercrete_mtd_sales,
+        SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
+        SUM(hwp_mtd_sales)       AS hwp_mtd_sales,
+        SUM(hcg_mtd_sales)       AS hcg_mtd_sales,
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
        FROM sales_current
        ${clause}${extra}
        GROUP BY territory, region, area
@@ -477,12 +572,12 @@ export const getByTerritory = async (
         territory: r.territory,
         region: r.region,
         area: r.area,
-        plc: Number(r.plc),
-        plc_plus: Number(r.plc_plus),
-        pow: Number(r.pow),
-        holcim_ss: Number(r.holcim_ss),
-        hwp: Number(r.hwp),
-        hcg: Number(r.hcg),
+        plc_mtd_sales: Number(r.plc_mtd_sales),
+        plc_plus_mtd_sales: Number(r.plc_plus_mtd_sales),
+        powercrete_mtd_sales: Number(r.powercrete_mtd_sales),
+        pcc_opc_mtd_sales: Number(r.pcc_opc_mtd_sales),
+        hwp_mtd_sales: Number(r.hwp_mtd_sales),
+        hcg_mtd_sales: Number(r.hcg_mtd_sales),
         total: Number(r.total),
       })),
     });
@@ -509,13 +604,13 @@ export const getCustomers = async (
         tsm_tse,
         asm_kam,
         rsm_b2b_head,
-        SUM(plc)       AS plc,
-        SUM(plc_plus)  AS plc_plus,
-        SUM(pow)       AS pow,
-        SUM(holcim_ss) AS holcim_ss,
-        SUM(hwp)       AS hwp,
-        SUM(hcg)       AS hcg,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales)       AS plc_mtd_sales,
+        SUM(plc_plus_mtd_sales)  AS plc_plus_mtd_sales,
+        SUM(powercrete_mtd_sales)       AS powercrete_mtd_sales,
+        SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
+        SUM(hwp_mtd_sales)       AS hwp_mtd_sales,
+        SUM(hcg_mtd_sales)       AS hcg_mtd_sales,
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
        FROM sales_current
        ${clause}${extra}
        GROUP BY customer_name, region, area, territory, tsm_tse, asm_kam, rsm_b2b_head
@@ -533,12 +628,12 @@ export const getCustomers = async (
       tsm_tse: r.tsm_tse,
       asm_kam: r.asm_kam,
       rsm_b2b_head: r.rsm_b2b_head,
-      plc: Number(r.plc),
-      plc_plus: Number(r.plc_plus),
-      pow: Number(r.pow),
-      holcim_ss: Number(r.holcim_ss),
-      hwp: Number(r.hwp),
-      hcg: Number(r.hcg),
+      plc_mtd_sales: Number(r.plc_mtd_sales),
+      plc_plus_mtd_sales: Number(r.plc_plus_mtd_sales),
+      powercrete_mtd_sales: Number(r.powercrete_mtd_sales),
+      pcc_opc_mtd_sales: Number(r.pcc_opc_mtd_sales),
+      hwp_mtd_sales: Number(r.hwp_mtd_sales),
+      hcg_mtd_sales: Number(r.hcg_mtd_sales),
       total: Number(r.total),
       pct_share: grandTotal
         ? Number(((Number(r.total) / grandTotal) * 100).toFixed(2))
@@ -570,7 +665,7 @@ export const getInsights = async (
     // Regions ranked
     const regionResult = await pool.query(
       `SELECT region,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
        FROM sales_current ${clause}${extra}
        GROUP BY region ORDER BY total DESC`,
       allParams,
@@ -579,7 +674,7 @@ export const getInsights = async (
     // Territories ranked
     const territoryResult = await pool.query(
       `SELECT territory,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
        FROM sales_current ${clause}${extra}
        GROUP BY territory ORDER BY total DESC`,
       allParams,
@@ -588,7 +683,7 @@ export const getInsights = async (
     // Customers ranked
     const customerResult = await pool.query(
       `SELECT customer_name,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
        FROM sales_current ${clause}${extra}
        GROUP BY customer_name ORDER BY total DESC`,
       allParams,
@@ -597,9 +692,9 @@ export const getInsights = async (
     // Products total
     const productResult = await pool.query(
       `SELECT
-        SUM(plc) AS plc, SUM(plc_plus) AS plc_plus,
-        SUM(pow) AS pow, SUM(holcim_ss) AS holcim_ss,
-        SUM(hwp) AS hwp, SUM(hcg) AS hcg
+        SUM(plc_mtd_sales) AS plc_mtd_sales, SUM(plc_plus_mtd_sales) AS plc_plus_mtd_sales,
+        SUM(powercrete_mtd_sales) AS powercrete_mtd_sales, SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
+        SUM(hwp_mtd_sales) AS hwp_mtd_sales, SUM(hcg_mtd_sales) AS hcg_mtd_sales
        FROM sales_current ${clause}${extra}`,
       allParams,
     );
@@ -616,21 +711,21 @@ export const getInsights = async (
 
         const r = await pool.query(
           `SELECT
-            SUM(plc) AS plc, SUM(plc_plus) AS plc_plus,
-            SUM(pow) AS pow, SUM(holcim_ss) AS holcim_ss,
-            SUM(hwp) AS hwp, SUM(hcg) AS hcg
+            SUM(plc_mtd_sales) AS plc_mtd_sales, SUM(plc_plus_mtd_sales) AS plc_plus_mtd_sales,
+            SUM(powercrete_mtd_sales) AS powercrete_mtd_sales, SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
+            SUM(hwp_mtd_sales) AS hwp_mtd_sales, SUM(hcg_mtd_sales) AS hcg_mtd_sales
            FROM sales_current
            ${clause}${extra} AND region = $${depParams.length}`,
           depParams,
         );
         const row = r.rows[0];
         const products = {
-          PLC: Number(row.plc),
-          "PLC+": Number(row.plc_plus),
-          POW: Number(row.pow),
-          "Holcim SS": Number(row.holcim_ss),
-          HWP: Number(row.hwp),
-          HCG: Number(row.hcg),
+          PLC: Number(row.plc_mtd_sales),
+          "PLC+": Number(row.plc_plus_mtd_sales),
+          Powercrete: Number(row.powercrete_mtd_sales),
+          "PCC + OPC": Number(row.pcc_opc_mtd_sales),
+          HWP: Number(row.hwp_mtd_sales),
+          HCG: Number(row.hcg_mtd_sales),
         };
         const topProduct = Object.entries(products).sort(
           ([, a], [, b]) => b - a,
@@ -650,12 +745,12 @@ export const getInsights = async (
 
     const pRow = productResult.rows[0];
     const productEntries = Object.entries({
-      PLC: Number(pRow.plc),
-      "PLC+": Number(pRow.plc_plus),
-      POW: Number(pRow.pow),
-      "Holcim SS": Number(pRow.holcim_ss),
-      HWP: Number(pRow.hwp),
-      HCG: Number(pRow.hcg),
+      PLC: Number(pRow.plc_mtd_sales),
+      "PLC+": Number(pRow.plc_plus_mtd_sales),
+      Powercrete: Number(pRow.powercrete_mtd_sales),
+      "PCC + OPC": Number(pRow.pcc_opc_mtd_sales),
+      HWP: Number(pRow.hwp_mtd_sales),
+      HCG: Number(pRow.hcg_mtd_sales),
     }).sort(([, a], [, b]) => b - a);
 
     const regions_list = regionResult.rows;
@@ -715,7 +810,7 @@ export const getDeepInsights = async (
     const bottomTsm = await pool.query(
       `SELECT tsm_tse,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
        FROM sales_current ${clause}${extra}
        AND tsm_tse NOT ILIKE '%vacant%'
        AND tsm_tse != ''
@@ -729,7 +824,7 @@ export const getDeepInsights = async (
     const bottomAsm = await pool.query(
       `SELECT asm_kam,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
        FROM sales_current ${clause}${extra}
        AND asm_kam != ''
        GROUP BY asm_kam
@@ -742,7 +837,7 @@ export const getDeepInsights = async (
     const bottomRsm = await pool.query(
       `SELECT rsm_b2b_head,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
        FROM sales_current ${clause}${extra}
        AND rsm_b2b_head != ''
        GROUP BY rsm_b2b_head
@@ -754,7 +849,7 @@ export const getDeepInsights = async (
     // ── 4. Bottom 5 customers ─────────────────────────────────────────────────
     const bottomCustomers = await pool.query(
       `SELECT customer_name, region, area, territory, tsm_tse, asm_kam,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
        FROM sales_current ${clause}${extra}
        GROUP BY customer_name, region, area, territory, tsm_tse, asm_kam
        ORDER BY total ASC
@@ -766,7 +861,7 @@ export const getDeepInsights = async (
     const bottomTerritories = await pool.query(
       `SELECT territory, region, area,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
        FROM sales_current ${clause}${extra}
        GROUP BY territory, region, area
        ORDER BY total ASC
@@ -778,7 +873,7 @@ export const getDeepInsights = async (
     const topTsm = await pool.query(
       `SELECT tsm_tse,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
       FROM sales_current ${clause}${extra}
       AND tsm_tse NOT ILIKE '%vacant%'
       AND tsm_tse != ''
@@ -792,7 +887,7 @@ export const getDeepInsights = async (
     const topAsm = await pool.query(
       `SELECT asm_kam,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
       FROM sales_current ${clause}${extra}
       AND asm_kam != ''
       GROUP BY asm_kam
@@ -805,7 +900,7 @@ export const getDeepInsights = async (
     const topRsm = await pool.query(
       `SELECT rsm_b2b_head,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
       FROM sales_current ${clause}${extra}
       AND rsm_b2b_head != ''
       GROUP BY rsm_b2b_head
@@ -817,7 +912,7 @@ export const getDeepInsights = async (
     // ── 4b. Top 5 customers ─────────────────────────────────────────────────
     const topCustomers = await pool.query(
       `SELECT customer_name, region, area, territory, tsm_tse, asm_kam,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
       FROM sales_current ${clause}${extra}
       GROUP BY customer_name, region, area, territory, tsm_tse, asm_kam
       ORDER BY total DESC
@@ -829,7 +924,7 @@ export const getDeepInsights = async (
     const topTerritories = await pool.query(
       `SELECT territory, region, area,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
       FROM sales_current ${clause}${extra}
       GROUP BY territory, region, area
       ORDER BY total DESC
@@ -841,7 +936,7 @@ export const getDeepInsights = async (
     const vacantTsm = await pool.query(
       `SELECT territory, region, area,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
        FROM sales_current ${clause}${extra}
        AND tsm_tse ILIKE '%vacant%'
        GROUP BY territory, region, area
@@ -851,7 +946,7 @@ export const getDeepInsights = async (
 
     // ── 7. Zero/low sales customers (bottom 10%) ──────────────────────────────
     const avgResult = await pool.query(
-      `SELECT AVG(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS avg
+      `SELECT AVG(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS avg
        FROM sales_current ${clause}${extra}`,
       allParams,
     );
@@ -860,10 +955,10 @@ export const getDeepInsights = async (
 
     const lowSalesCustomers = await pool.query(
       `SELECT customer_name, region, area, territory, tsm_tse,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
        FROM sales_current ${clause}${extra}
        GROUP BY customer_name, region, area, territory, tsm_tse
-       HAVING SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) <= $${allParams.length + 1}
+       HAVING SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) <= $${allParams.length + 1}
        ORDER BY total ASC
        LIMIT 20`,
       [...allParams, threshold],
@@ -872,21 +967,21 @@ export const getDeepInsights = async (
     // ── 8. Single product customers (upsell opportunity) ─────────────────────
     const singleProductCustomers = await pool.query(
       `SELECT customer_name, region, area, territory, tsm_tse,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total,
-        (CASE WHEN SUM(plc) > 0 THEN 1 ELSE 0 END +
-         CASE WHEN SUM(plc_plus) > 0 THEN 1 ELSE 0 END +
-         CASE WHEN SUM(pow) > 0 THEN 1 ELSE 0 END +
-         CASE WHEN SUM(holcim_ss) > 0 THEN 1 ELSE 0 END +
-         CASE WHEN SUM(hwp) > 0 THEN 1 ELSE 0 END +
-         CASE WHEN SUM(hcg) > 0 THEN 1 ELSE 0 END) AS products_buying
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total,
+        (CASE WHEN SUM(plc_mtd_sales) > 0 THEN 1 ELSE 0 END +
+         CASE WHEN SUM(plc_plus_mtd_sales) > 0 THEN 1 ELSE 0 END +
+         CASE WHEN SUM(powercrete_mtd_sales) > 0 THEN 1 ELSE 0 END +
+         CASE WHEN SUM(pcc_opc_mtd_sales) > 0 THEN 1 ELSE 0 END +
+         CASE WHEN SUM(hwp_mtd_sales) > 0 THEN 1 ELSE 0 END +
+         CASE WHEN SUM(hcg_mtd_sales) > 0 THEN 1 ELSE 0 END) AS products_buying
        FROM sales_current ${clause}${extra}
        GROUP BY customer_name, region, area, territory, tsm_tse
-       HAVING (CASE WHEN SUM(plc) > 0 THEN 1 ELSE 0 END +
-               CASE WHEN SUM(plc_plus) > 0 THEN 1 ELSE 0 END +
-               CASE WHEN SUM(pow) > 0 THEN 1 ELSE 0 END +
-               CASE WHEN SUM(holcim_ss) > 0 THEN 1 ELSE 0 END +
-               CASE WHEN SUM(hwp) > 0 THEN 1 ELSE 0 END +
-               CASE WHEN SUM(hcg) > 0 THEN 1 ELSE 0 END) = 1
+       HAVING (CASE WHEN SUM(plc_mtd_sales) > 0 THEN 1 ELSE 0 END +
+               CASE WHEN SUM(plc_plus_mtd_sales) > 0 THEN 1 ELSE 0 END +
+               CASE WHEN SUM(powercrete_mtd_sales) > 0 THEN 1 ELSE 0 END +
+               CASE WHEN SUM(pcc_opc_mtd_sales) > 0 THEN 1 ELSE 0 END +
+               CASE WHEN SUM(hwp_mtd_sales) > 0 THEN 1 ELSE 0 END +
+               CASE WHEN SUM(hcg_mtd_sales) > 0 THEN 1 ELSE 0 END) = 1
        ORDER BY total DESC
        LIMIT 20`,
       allParams,
@@ -896,7 +991,7 @@ export const getDeepInsights = async (
     const concentrationResult = await pool.query(
       `WITH ranked AS (
         SELECT customer_name,
-          SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+          SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
         FROM sales_current ${clause}${extra}
         GROUP BY customer_name
         ORDER BY total DESC
@@ -920,10 +1015,10 @@ export const getDeepInsights = async (
     // ── 10. Product concentration risk ───────────────────────────────────────
     const productResult = await pool.query(
       `SELECT
-        SUM(plc) AS plc, SUM(plc_plus) AS plc_plus,
-        SUM(pow) AS pow, SUM(holcim_ss) AS holcim_ss,
-        SUM(hwp) AS hwp, SUM(hcg) AS hcg,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales) AS plc_mtd_sales, SUM(plc_plus_mtd_sales) AS plc_plus_mtd_sales,
+        SUM(powercrete_mtd_sales) AS powercrete_mtd_sales, SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
+        SUM(hwp_mtd_sales) AS hwp_mtd_sales, SUM(hcg_mtd_sales) AS hcg_mtd_sales,
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
        FROM sales_current ${clause}${extra}`,
       allParams,
     );
@@ -931,12 +1026,12 @@ export const getDeepInsights = async (
     const pRow = productResult.rows[0];
     const totalSales = Number(pRow.total ?? 0);
     const productConcentration = [
-      { name: "PLC", value: Number(pRow.plc) },
-      { name: "PLC+", value: Number(pRow.plc_plus) },
-      { name: "POW", value: Number(pRow.pow) },
-      { name: "Holcim SS", value: Number(pRow.holcim_ss) },
-      { name: "HWP", value: Number(pRow.hwp) },
-      { name: "HCG", value: Number(pRow.hcg) },
+      { name: "PLC", value: Number(pRow.plc_mtd_sales) },
+      { name: "PLC+", value: Number(pRow.plc_plus_mtd_sales) },
+      { name: "Powercrete", value: Number(pRow.powercrete_mtd_sales) },
+      { name: "PCC + OPC", value: Number(pRow.pcc_opc_mtd_sales) },
+      { name: "HWP", value: Number(pRow.hwp_mtd_sales) },
+      { name: "HCG", value: Number(pRow.hcg_mtd_sales) },
     ]
       .sort((a, b) => b.value - a.value)
       .map((p) => ({
@@ -950,8 +1045,8 @@ export const getDeepInsights = async (
       `SELECT tsm_tse,
         COUNT(DISTINCT customer_name) AS customers,
         COUNT(DISTINCT territory)     AS territories,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total,
-        AVG(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS avg_per_customer
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total,
+        AVG(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS avg_per_customer
        FROM sales_current ${clause}${extra}
        AND tsm_tse NOT ILIKE '%vacant%'
        AND tsm_tse != ''
@@ -963,7 +1058,7 @@ export const getDeepInsights = async (
     const tsmCustomerStats = await pool.query(
       `WITH customer_totals AS (
         SELECT tsm_tse, customer_name,
-          SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+          SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
         FROM sales_current ${clause}${extra}
         AND tsm_tse NOT ILIKE '%vacant%'
         AND tsm_tse != ''
@@ -988,7 +1083,7 @@ export const getDeepInsights = async (
     // ── 12. Region concentration risk ────────────────────────────────────────
     const regionResult = await pool.query(
       `SELECT region,
-        SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
        FROM sales_current ${clause}${extra}
        GROUP BY region
        ORDER BY total DESC`,
@@ -1008,7 +1103,7 @@ export const getDeepInsights = async (
       `WITH territory_totals AS (
         SELECT territory, region, area,
           COUNT(DISTINCT customer_name) AS customers,
-          SUM(plc + plc_plus + pow + holcim_ss + hwp + hcg) AS total
+          SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
         FROM sales_current ${clause}${extra}
         GROUP BY territory, region, area
       ),
@@ -1188,5 +1283,363 @@ export const getDeepInsights = async (
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch deep insights" });
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// D-1 DAILY REPORT ENDPOINTS
+// ═══════════════════════════════════════════════════════════════════════════
+// Everything below reads the *_yesterday, *_target, and *_ach columns added
+// by migration_002. Yesterday Sales is the PRIMARY metric for these — this
+// is the actual daily sales report, distinct from the MTD-cumulative view
+// the endpoints above provide.
+//
+// Reuses the exact same resolveDateFilter/buildFilters helpers as the rest
+// of this file: each upload's *_yesterday columns already represent that
+// upload's D-1 sales, so "latest upload_date" (the existing default) is
+// still the right default here — no new date-resolution logic needed.
+
+const YESTERDAY_SUM_EXPR =
+  "(plc_yesterday + plc_plus_yesterday + powercrete_yesterday + pcc_opc_yesterday + hwp_yesterday + hcg_yesterday)";
+const TARGET_SUM_EXPR =
+  "(plc_target + plc_plus_target + powercrete_target + pcc_opc_target + hwp_target + hcg_target)";
+
+const YESTERDAY_PRODUCT_NAME_MAP: Record<string, string> = {
+  plc_yesterday: "PLC",
+  plc_plus_yesterday: "PLC+",
+  powercrete_yesterday: "Powercrete",
+  pcc_opc_yesterday: "PCC + OPC",
+  hwp_yesterday: "HWP",
+  hcg_yesterday: "HCG",
+};
+
+const pctOf = (numerator: number, denominator: number): number =>
+  denominator ? Number(((numerator / denominator) * 100).toFixed(2)) : 0;
+
+// ─── GET /api/sales/yesterday/kpi ─────────────────────────────────────────────
+export const getYesterdayKpi = async (
+  req: AuthRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { clause, params, defaultDate } = await resolveDateFilter(req.query);
+    const { extra, params: allParams } = buildFilters(req.query, params);
+
+    const result = await pool.query(
+      `SELECT
+        COALESCE(SUM(${YESTERDAY_SUM_EXPR}), 0) AS total_yesterday,
+        COALESCE(SUM(${TARGET_SUM_EXPR}), 0)    AS total_target,
+        COUNT(DISTINCT customer_name)             AS total_customers,
+        COUNT(DISTINCT territory)                 AS total_territories,
+        COALESCE(AVG(${YESTERDAY_SUM_EXPR}), 0) AS avg_per_customer
+       FROM sales_current
+       ${clause}${extra}`,
+      allParams,
+    );
+
+    const regionResult = await pool.query(
+      `SELECT region, SUM(${YESTERDAY_SUM_EXPR}) AS total
+       FROM sales_current
+       ${clause}${extra}
+       GROUP BY region
+       ORDER BY total DESC`,
+      allParams,
+    );
+
+    const productResult = await pool.query(
+      `SELECT
+        SUM(plc_yesterday)       AS plc_yesterday,
+        SUM(plc_plus_yesterday)  AS plc_plus_yesterday,
+        SUM(powercrete_yesterday)       AS powercrete_yesterday,
+        SUM(pcc_opc_yesterday) AS pcc_opc_yesterday,
+        SUM(hwp_yesterday)       AS hwp_yesterday,
+        SUM(hcg_yesterday)       AS hcg_yesterday
+       FROM sales_current
+       ${clause}${extra}`,
+      allParams,
+    );
+
+    const row = result.rows[0];
+    const totalYesterday = Number(row.total_yesterday);
+    const totalTarget = Number(row.total_target);
+    const regions = regionResult.rows;
+    const products = productResult.rows[0] ?? {};
+
+    const productEntries = Object.entries(products)
+      .map(
+        ([k, v]) =>
+          [YESTERDAY_PRODUCT_NAME_MAP[k] ?? k, v] as [string, unknown],
+      )
+      .sort(([, a], [, b]) => Number(b) - Number(a));
+
+    res.json({
+      date_used: defaultDate,
+      total_yesterday_sales: totalYesterday,
+      total_target: totalTarget,
+      achievement_pct: pctOf(totalYesterday, totalTarget),
+      total_customers: Number(row.total_customers),
+      total_territories: Number(row.total_territories),
+      avg_per_customer: Number(row.avg_per_customer),
+      top_region: {
+        name: regions[0]?.region ?? null,
+        value: Number(regions[0]?.total ?? 0),
+      },
+      lowest_region: {
+        name: regions[regions.length - 1]?.region ?? null,
+        value: Number(regions[regions.length - 1]?.total ?? 0),
+      },
+      top_product: {
+        name: productEntries[0]?.[0] ?? null,
+        value: Number(productEntries[0]?.[1] ?? 0),
+      },
+      lowest_product: {
+        name: productEntries[productEntries.length - 1]?.[0] ?? null,
+        value: Number(productEntries[productEntries.length - 1]?.[1] ?? 0),
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch yesterday KPI" });
+  }
+};
+
+// ─── GET /api/sales/yesterday/by-region ───────────────────────────────────────
+export const getYesterdayByRegion = async (
+  req: AuthRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { clause, params, defaultDate } = await resolveDateFilter(req.query);
+    const { extra, params: allParams } = buildFilters(req.query, params);
+
+    const result = await pool.query(
+      `SELECT
+        region,
+        SUM(plc_yesterday)       AS plc_yesterday,
+        SUM(plc_plus_yesterday)  AS plc_plus_yesterday,
+        SUM(powercrete_yesterday)       AS powercrete_yesterday,
+        SUM(pcc_opc_yesterday) AS pcc_opc_yesterday,
+        SUM(hwp_yesterday)       AS hwp_yesterday,
+        SUM(hcg_yesterday)       AS hcg_yesterday,
+        SUM(${YESTERDAY_SUM_EXPR}) AS total_yesterday,
+        SUM(${TARGET_SUM_EXPR})    AS total_target
+       FROM sales_current
+       ${clause}${extra}
+       GROUP BY region
+       ORDER BY total_yesterday DESC`,
+      allParams,
+    );
+
+    res.json({
+      date_used: defaultDate,
+      data: result.rows.map((r) => {
+        const totalYesterday = Number(r.total_yesterday);
+        const totalTarget = Number(r.total_target);
+        return {
+          region: r.region,
+          plc_mtd_sales: Number(r.plc_yesterday),
+          plc_plus_mtd_sales: Number(r.plc_plus_yesterday),
+          powercrete_mtd_sales: Number(r.powercrete_yesterday),
+          pcc_opc_mtd_sales: Number(r.pcc_opc_yesterday),
+          hwp_mtd_sales: Number(r.hwp_yesterday),
+          hcg_mtd_sales: Number(r.hcg_yesterday),
+          total_yesterday: totalYesterday,
+          total_target: totalTarget,
+          achievement_pct: pctOf(totalYesterday, totalTarget),
+        };
+      }),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch yesterday region data" });
+  }
+};
+
+// ─── GET /api/sales/yesterday/by-product ──────────────────────────────────────
+export const getYesterdayByProduct = async (
+  req: AuthRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { clause, params, defaultDate } = await resolveDateFilter(req.query);
+    const { extra, params: allParams } = buildFilters(req.query, params);
+
+    const result = await pool.query(
+      `SELECT
+        SUM(plc_yesterday) AS plc_yesterday, SUM(plc_target) AS plc_target,
+        SUM(plc_plus_yesterday) AS plc_plus_yesterday, SUM(plc_plus_target) AS plc_plus_target,
+        SUM(powercrete_yesterday) AS powercrete_yesterday, SUM(powercrete_target) AS powercrete_target,
+        SUM(pcc_opc_yesterday) AS pcc_opc_yesterday, SUM(pcc_opc_target) AS pcc_opc_target,
+        SUM(hwp_yesterday) AS hwp_yesterday, SUM(hwp_target) AS hwp_target,
+        SUM(hcg_yesterday) AS hcg_yesterday, SUM(hcg_target) AS hcg_target
+       FROM sales_current
+       ${clause}${extra}`,
+      allParams,
+    );
+
+    const row = result.rows[0];
+    const totalYesterday =
+      Number(row.plc_yesterday) +
+      Number(row.plc_plus_yesterday) +
+      Number(row.powercrete_yesterday) +
+      Number(row.pcc_opc_yesterday) +
+      Number(row.hwp_yesterday) +
+      Number(row.hcg_yesterday);
+
+    const products = [
+      {
+        name: "PLC",
+        value: Number(row.plc_yesterday),
+        target: Number(row.plc_target),
+      },
+      {
+        name: "PLC+",
+        value: Number(row.plc_plus_yesterday),
+        target: Number(row.plc_plus_target),
+      },
+      {
+        name: "Powercrete",
+        value: Number(row.powercrete_yesterday),
+        target: Number(row.powercrete_target),
+      },
+      {
+        name: "PCC + OPC",
+        value: Number(row.pcc_opc_yesterday),
+        target: Number(row.pcc_opc_target),
+      },
+      {
+        name: "HWP",
+        value: Number(row.hwp_yesterday),
+        target: Number(row.hwp_target),
+      },
+      {
+        name: "HCG",
+        value: Number(row.hcg_yesterday),
+        target: Number(row.hcg_target),
+      },
+    ].sort((a, b) => b.value - a.value);
+
+    res.json({
+      date_used: defaultDate,
+      total_yesterday: totalYesterday,
+      data: products.map((p) => ({
+        name: p.name,
+        value: p.value,
+        target: p.target,
+        achievement_pct: pctOf(p.value, p.target),
+        pct_of_total: pctOf(p.value, totalYesterday),
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch yesterday product data" });
+  }
+};
+
+// ─── GET /api/sales/yesterday/by-territory ────────────────────────────────────
+export const getYesterdayByTerritory = async (
+  req: AuthRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { clause, params, defaultDate } = await resolveDateFilter(req.query);
+    const { extra, params: allParams } = buildFilters(req.query, params);
+
+    const result = await pool.query(
+      `SELECT
+        territory,
+        region,
+        area,
+        SUM(${YESTERDAY_SUM_EXPR}) AS total_yesterday,
+        SUM(${TARGET_SUM_EXPR})    AS total_target
+       FROM sales_current
+       ${clause}${extra}
+       GROUP BY territory, region, area
+       ORDER BY total_yesterday DESC`,
+      allParams,
+    );
+
+    res.json({
+      date_used: defaultDate,
+      data: result.rows.map((r) => {
+        const totalYesterday = Number(r.total_yesterday);
+        const totalTarget = Number(r.total_target);
+        return {
+          territory: r.territory,
+          region: r.region,
+          area: r.area,
+          total_yesterday: totalYesterday,
+          total_target: totalTarget,
+          achievement_pct: pctOf(totalYesterday, totalTarget),
+        };
+      }),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch yesterday territory data" });
+  }
+};
+
+// ─── GET /api/sales/yesterday/customers ───────────────────────────────────────
+export const getYesterdayCustomers = async (
+  req: AuthRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { clause, params, defaultDate } = await resolveDateFilter(req.query);
+    const { extra, params: allParams } = buildFilters(req.query, params);
+
+    const result = await pool.query(
+      `SELECT
+        customer_name,
+        region,
+        area,
+        territory,
+        tsm_tse,
+        asm_kam,
+        rsm_b2b_head,
+        SUM(${YESTERDAY_SUM_EXPR}) AS total_yesterday,
+        SUM(${TARGET_SUM_EXPR})    AS total_target
+       FROM sales_current
+       ${clause}${extra}
+       GROUP BY customer_name, region, area, territory, tsm_tse, asm_kam, rsm_b2b_head
+       ORDER BY total_yesterday DESC`,
+      allParams,
+    );
+
+    const grandTotal = result.rows.reduce(
+      (s, r) => s + Number(r.total_yesterday),
+      0,
+    );
+
+    const customers = result.rows.map((r) => {
+      const totalYesterday = Number(r.total_yesterday);
+      const totalTarget = Number(r.total_target);
+      return {
+        customer_name: r.customer_name,
+        region: r.region,
+        area: r.area,
+        territory: r.territory,
+        tsm_tse: r.tsm_tse,
+        asm_kam: r.asm_kam,
+        rsm_b2b_head: r.rsm_b2b_head,
+        total_yesterday: totalYesterday,
+        total_target: totalTarget,
+        achievement_pct: pctOf(totalYesterday, totalTarget),
+        pct_share: pctOf(totalYesterday, grandTotal),
+      };
+    });
+
+    res.json({
+      date_used: defaultDate,
+      total_customers: customers.length,
+      grand_total_yesterday: grandTotal,
+      top5: customers.slice(0, 5),
+      bottom5: customers.slice(-5).reverse(),
+      data: customers,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch yesterday customer data" });
   }
 };

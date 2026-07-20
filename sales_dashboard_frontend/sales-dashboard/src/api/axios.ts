@@ -18,7 +18,7 @@ export const getAuthToken = () => authToken
 const http = rateLimit(
   axios.create({
     baseURL: BASE_URL,
-    timeout: 15000,
+    timeout: 150000,
     headers: { "Content-Type": "application/json" },
   }),
   { maxRequests: 20, perMilliseconds: 1000 }

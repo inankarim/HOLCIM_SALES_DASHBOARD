@@ -16,36 +16,40 @@ import { ImageDown } from "lucide-react";
 import { exportChartToPng } from "../../lib/exportPng";
 import type { FilterParams } from "../../api/salesApi";
 
-const PRODUCTS = ["plc", "plc_plus", "pow", "holcim_ss", "hwp", "hcg"];
-
-
-
+const PRODUCTS = [
+  "plc_mtd_sales",
+  "plc_plus_mtd_sales",
+  "powercrete_mtd_sales",
+  "pcc_opc_mtd_sales",
+  "hwp_mtd_sales",
+  "hcg_mtd_sales",
+];
 
 const PRODUCT_LABELS: Record<string, string> = {
-  plc: "Supercrete",
-  plc_plus: "Supercrete Plus",
-  pow: "POW",
-  holcim_ss: "Holcim Strong Structure",
-  hwp: "Holcim Water Protect",
-  hcg: "Holcim Coastal Guard",
+  plc_mtd_sales: "Supercrete",
+  plc_plus_mtd_sales: "Supercrete Plus",
+  powercrete_mtd_sales: "POW",
+  pcc_opc_mtd_sales: "Holcim Strong Structure",
+  hwp_mtd_sales: "Holcim Water Protect",
+  hcg_mtd_sales: "Holcim Coastal Guard",
 };
 
 const PRODUCT_KEY_MAP: Record<string, string> = {
-  "PLC": "plc",
-  "PLC+": "plc_plus",
-  "POW": "pow",
-  "Holcim SS": "holcim_ss",
-  "HWP": "hwp",
-  "HCG": "hcg",
+  "PLC": "plc_mtd_sales",
+  "PLC+": "plc_plus_mtd_sales",
+  "POW": "powercrete_mtd_sales",
+  "Holcim SS": "pcc_opc_mtd_sales",
+  "HWP": "hwp_mtd_sales",
+  "HCG": "hcg_mtd_sales",
 };
 
 const COLORS: Record<string, string> = {
-  plc: "#3b82f6",
-  plc_plus: "#10b981",
-  pow: "#f59e0b",
-  holcim_ss: "#ec4899",
-  hwp: "#22c55e",
-  hcg: "#ef4444",
+  plc_mtd_sales: "#3b82f6",
+  plc_plus_mtd_sales: "#10b981",
+  powercrete_mtd_sales: "#f59e0b",
+  pcc_opc_mtd_sales: "#ec4899",
+  hwp_mtd_sales: "#22c55e",
+  hcg_mtd_sales: "#ef4444",
 };
 
 interface Props {

@@ -1,8 +1,8 @@
-
 import { KpiRow } from "../components/shared/kpiRow";
 import { RegionChart } from "../components/charts/RegionChart";
 import { ProductMixChart } from "../components/charts/ProductMixChart";
 import { ProductComparisonChart } from "../components/charts/ProductComparisonChart";
+import { TargetAttainmentChart } from "../components/charts/ Targetattainmentchart";
 import { HeatmapChart } from "../components/charts/HeatmapChart";
 import { AreaChart } from "../components/charts/AreaChart";
 import { TerritoryChart } from "../components/charts/TerritoryChart";
@@ -41,6 +41,10 @@ export function DashboardPage({ filters }: Props) {
         <div id="chart-product-comparison">
           <ProductComparisonChart filters={filters} />
         </div>
+      </div>
+
+      <div id="chart-target-attainment">
+        <TargetAttainmentChart filters={filters} />
       </div>
 
       <div id="chart-heatmap">

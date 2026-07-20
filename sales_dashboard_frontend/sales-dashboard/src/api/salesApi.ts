@@ -45,6 +45,10 @@ export const salesApi = {
   getByProduct: (params: FilterParams) =>
     http.get("/api/sales/by-product", { params }),
 
+  // Get MTD sales vs target per product, with achievement %
+  getMtdTargetByProduct: (params: FilterParams) =>
+    http.get("/api/sales/mtd-target-by-product", { params }),
+
   // Get region product heatmap
   getHeatmap: (params: FilterParams) =>
     http.get("/api/sales/region-product-heatmap", { params }),
@@ -89,67 +93,52 @@ export const salesApi = {
 
   // Upload file
   // Upload file with security checks
-  uploadFile: async (file: File, uploadDate: string) => {
-    // 1. Check file extension
-    const allowedExtensions = [".csv", ".xlsx"]
-    const fileName = file.name.toLowerCase()
-    const hasValidExt = allowedExtensions.some((ext) => fileName.endsWith(ext))
-    if (!hasValidExt) {
-      return Promise.reject(new Error("Only CSV or XLSX files are allowed."))
-    }
+  // Upload both source files with security checks
+  uploadFiles: async (fileA: File, fileB: File, uploadDate: string) => {
+    const MAX_SIZE = 70 * 1024 * 1024 // 10MB
 
-    // 2. Check file size (max 10MB)
-    const MAX_SIZE = 10 * 1024 * 1024
-    if (file.size > MAX_SIZE) {
-      return Promise.reject(new Error("File size must be under 10MB."))
-    }
+    const validateFile = async (file: File, label: string): Promise<void> => {
+      // 1. Check file extension — only .xlsx for the two-file merge flow
+      const fileName = file.name.toLowerCase()
+      if (!fileName.endsWith(".xlsx")) {
+        throw new Error(`${label}: only .xlsx files are allowed.`)
+      }
 
-    // 3. Check magic bytes (real file signature)
-    const buffer = await file.slice(0, 8).arrayBuffer()
-    const bytes = new Uint8Array(buffer)
-    const hex = Array.from(bytes)
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("")
+      // 2. Check file size
+      if (file.size > MAX_SIZE) {
+        throw new Error(`${label}: file size must be under 10MB.`)
+      }
 
-    const isXLSX = hex.startsWith("504b0304")
+      // 3. Check magic bytes (real file signature) — .xlsx is a zip archive,
+      // so its first 4 bytes are always the zip signature 50 4B 03 04.
+      const buffer = await file.slice(0, 8).arrayBuffer()
+      const bytes = new Uint8Array(buffer)
+      const hex = Array.from(bytes)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+      const isXLSX = hex.startsWith("504b0304")
 
-    if (fileName.endsWith(".xlsx") && !isXLSX) {
-      return Promise.reject(new Error("File is not a valid XLSX file."))
-    }
-
-    // 4. If CSV, validate required columns exist
-    if (fileName.endsWith(".csv")) {
-      const text = await file.slice(0, 2000).text()
-      const firstLine = text
-        .split("\n")[0]
-        .toLowerCase()
-        .replace(/\s+/g, "_")
-        .replace(/['"]/g, "")
-      const requiredColumns = [
-        "customer_name",
-        "region",
-        "area",
-        "territory",
-        "plc",
-      ]
-      const missingCols = requiredColumns.filter(
-        (col) => !firstLine.includes(col)
-      )
-      if (missingCols.length > 0) {
-        return Promise.reject(
-          new Error(`Missing required columns: ${missingCols.join(", ")}`)
-        )
+      if (!isXLSX) {
+        throw new Error(`${label}: file is not a valid XLSX file.`)
       }
     }
 
-    // 5. Validate date format
+    try {
+      await validateFile(fileA, "First file")
+      await validateFile(fileB, "Second file")
+    } catch (err) {
+      return Promise.reject(err)
+    }
+
+    // 4. Validate date format
     const datePattern = /^\d{4}-\d{2}-\d{2}$/
     if (!datePattern.test(uploadDate)) {
       return Promise.reject(new Error("Invalid date format. Use YYYY-MM-DD."))
     }
 
     const formData = new FormData()
-    formData.append("file", file)
+    formData.append("file_a", fileA)
+    formData.append("file_b", fileB)
     formData.append("upload_date", uploadDate)
     return http.post("/api/upload", formData, {
       headers: { "Content-Type": "multipart/form-data" },
