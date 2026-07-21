@@ -23,6 +23,7 @@ const CHART_JOBS = [
   { id: "chart-region",             label: "Region-Performance" },
   { id: "chart-product-mix",        label: "Product-Mix" },
   { id: "chart-product-comparison", label: "Product-Comparison" },
+  { id: "chart-target-attainment",  label: "Target-Attainment" },
   { id: "chart-heatmap",            label: "Heatmap" },
   { id: "chart-area",               label: "Area-Performance" },
   { id: "chart-territory",          label: "Territory-Ranking" },
@@ -43,6 +44,7 @@ const DISPLAY_LABELS: Record<JobLabel, string> = {
   "Region-Performance":  "Region Performance",
   "Product-Mix":         "Product Mix",
   "Product-Comparison":  "Product Comparison",
+  "Target-Attainment":   "Target Attainment",
   "Heatmap":             "Region × Product Heatmap",
   "Area-Performance":    "Area Performance",
   "Territory-Ranking":   "Territory Ranking",
@@ -434,7 +436,7 @@ export function EmailChartModal({ open, onClose, onEmailSent, filters }: Props) 
             <div className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground space-y-1">
               <p className="flex items-center gap-1.5">
                 <ImageDown className="h-3 w-3 shrink-0" />
-                7 dashboard charts will be captured and embedded in the email
+                {CHART_JOBS.length} dashboard charts will be captured and embedded in the email
               </p>
               <p className="flex items-center gap-1.5">
                 <Mail className="h-3 w-3 shrink-0" />

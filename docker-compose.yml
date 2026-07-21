@@ -21,6 +21,23 @@ services:
       timeout: 5s
       retries: 5
 
+  # Python FastAPI microservice that merges the two daily Excel exports.
+  # Service name matches uploadController.ts's default MERGE_SERVICE_URL
+  # host (sales-summary-service), so backend doesn't strictly need the env
+  # var below to find it — it's set explicitly anyway for clarity.
+  sales-summary-service:
+    image: inankarim/sales_merge_service:latest
+    container_name: sales_merge_service
+    restart: always
+    networks:
+      - sales_network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
   backend:
     image: inankarim/sales_backend:latest
     container_name: sales_backend
@@ -37,8 +54,12 @@ services:
       EMAIL_USER: inankarimchowdhury@gmail.com
       EMAIL_PASS: ${EMAIL_PASS}
       NODE_ENV: production
+      MERGE_SERVICE_URL: http://sales-summary-service:8000
+      FRONTEND_URL: http://10.238.128.70
     depends_on:
       db:
+        condition: service_healthy
+      sales-summary-service:
         condition: service_healthy
     volumes:
       - uploads:/app/uploads

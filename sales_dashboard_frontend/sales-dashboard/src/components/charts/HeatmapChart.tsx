@@ -19,7 +19,7 @@ const PRODUCT_LABELS: Record<string, string> = {
   plc_mtd_sales: "PLC",
   plc_plus_mtd_sales: "PLC+",
   powercrete_mtd_sales: "POW",
-  pcc_opc_mtd_sales: "Holcim SS",
+  pcc_opc_mtd_sales: "HOLCIM",
   hwp_mtd_sales: "HWP",
   hcg_mtd_sales: "HCG",
 };

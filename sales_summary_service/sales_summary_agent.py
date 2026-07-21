@@ -102,7 +102,12 @@ PRODUCT_GROUPS: dict[str, dict[str, list[str]]] = {
     "Powercrete": {
         "Target": ["powercrete target"],
         "MTD Sales": ["powercrete mtd sales"],
-        "Yesterday Sales": ["yesterday powercrete sales"],
+        # The source file has a standing typo ("Prowercrete") in this one
+        # header only (Target/MTD Sales/Ach% are spelled correctly). Without
+        # this alias the column silently fails to match and Yesterday Sales
+        # for Powercrete comes back blank/0 in every merge, even though the
+        # real figure is present in the file.
+        "Yesterday Sales": ["yesterday powercrete sales", "yesterday prowercrete sales"],
         "Achievement %": ["powercrete ach%"],
     },
 }
@@ -336,6 +341,92 @@ def normalize_join_name(series: pd.Series) -> pd.Series:
     return series.astype(str).str.strip().str.lower().str.replace(r"\s+", " ", regex=True)
 
 
+def normalize_territory(series: pd.Series) -> pd.Series:
+    """Normalized Territory used only for the fallback-match comparison below."""
+    return series.astype(str).str.strip().str.lower().str.replace(r"\s+", " ", regex=True)
+
+
+def apply_territory_fallback_matches(side1: pd.DataFrame, side2: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Recovers matches lost when one file numbers a customer's sub-distributor
+    rows ("Acme 1", "Acme 2", "Acme 3"...) while the other file keeps a single
+    combined row for the same SAP ID ("Acme", no suffix). An exact match on
+    (SAP ID, normalized Customer Name) misses these entirely -- the combined
+    row never matches any of the numbered rows -- so its figures silently end
+    up stranded in a disconnected output row instead of attached to the real
+    sub-distributor(s).
+
+    For each SAP ID where some rows fail to match by name on *both* sides,
+    this falls back to (SAP ID, Territory): when the side with exactly one
+    unmatched row shares its Territory with one or more unmatched rows on the
+    other side, its figures are copied onto every one of those matching rows
+    (the combined total is broadcast onto each matching sub-row, rather than
+    split or dropped) by giving synthetic copies the sub-rows' `_join_name`
+    so the normal outer join naturally attaches them.
+
+    SAP IDs where neither side narrows down to exactly one unmatched row are
+    left as-is (too ambiguous to guess safely) -- same as current behavior.
+    """
+    idx1 = pd.MultiIndex.from_frame(side1[["SAP ID", "_join_name"]])
+    idx2 = pd.MultiIndex.from_frame(side2[["SAP ID", "_join_name"]])
+    matched_keys = idx1.intersection(idx2)
+
+    unmatched1 = side1[~idx1.isin(matched_keys)]
+    unmatched2 = side2[~idx2.isin(matched_keys)]
+
+    common_ids = set(unmatched1["SAP ID"]) & set(unmatched2["SAP ID"])
+    if not common_ids:
+        return side1, side2
+
+    territory1 = normalize_territory(side1["Territory"])
+    territory2 = normalize_territory(side2["Territory"])
+
+    extra_side1_rows: list[pd.Series] = []
+    extra_side2_rows: list[pd.Series] = []
+    consumed_side1_idx: list = []
+    consumed_side2_idx: list = []
+
+    for sap_id in common_ids:
+        u1 = unmatched1[unmatched1["SAP ID"] == sap_id]
+        u2 = unmatched2[unmatched2["SAP ID"] == sap_id]
+
+        # file2 holds the lone combined row; file1 holds the numbered sub-rows.
+        if len(u2) == 1 and len(u1) >= 1:
+            agg_row = u2.iloc[0]
+            agg_territory = territory2.loc[agg_row.name]
+            targets = u1[territory1.loc[u1.index] == agg_territory]
+            if len(targets) >= 1:
+                for sub_idx, sub in targets.iterrows():
+                    copy = agg_row.copy()
+                    copy["_join_name"] = sub["_join_name"]
+                    extra_side2_rows.append(copy)
+                consumed_side2_idx.append(agg_row.name)
+                continue  # this SAP ID is resolved
+
+        # file1 holds the lone combined row; file2 holds the numbered sub-rows.
+        if len(u1) == 1 and len(u2) >= 1:
+            agg_row = u1.iloc[0]
+            agg_territory = territory1.loc[agg_row.name]
+            targets = u2[territory2.loc[u2.index] == agg_territory]
+            if len(targets) >= 1:
+                for sub_idx, sub in targets.iterrows():
+                    copy = agg_row.copy()
+                    copy["_join_name"] = sub["_join_name"]
+                    extra_side1_rows.append(copy)
+                consumed_side1_idx.append(agg_row.name)
+
+    if consumed_side2_idx:
+        side2 = side2.drop(index=consumed_side2_idx)
+    if consumed_side1_idx:
+        side1 = side1.drop(index=consumed_side1_idx)
+
+    if extra_side2_rows:
+        side2 = pd.concat([side2, pd.DataFrame(extra_side2_rows)], ignore_index=True)
+    if extra_side1_rows:
+        side1 = pd.concat([side1, pd.DataFrame(extra_side1_rows)], ignore_index=True)
+
+    return side1, side2
+
+
 def build_merged_dataframe(file1: LoadedFile, file2: LoadedFile) -> pd.DataFrame:
     info1 = extract_customer_info(file1)
     info2 = extract_customer_info(file2)
@@ -358,6 +449,11 @@ def build_merged_dataframe(file1: LoadedFile, file2: LoadedFile) -> pd.DataFrame
 
     side1 = pd.concat([info1, prod1], axis=1)
     side2 = pd.concat([info2, prod2], axis=1)
+
+    # Recover rows that would otherwise be lost/stranded because one file
+    # numbers sub-distributor rows while the other keeps a single combined
+    # row for the same SAP ID (see docstring above).
+    side1, side2 = apply_territory_fallback_matches(side1, side2)
 
     merged = pd.merge(
         side1, side2,

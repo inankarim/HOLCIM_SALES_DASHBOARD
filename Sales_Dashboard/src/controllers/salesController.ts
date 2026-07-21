@@ -16,6 +16,45 @@ const PRODUCTS = [
   "hcg_mtd_sales",
 ];
 
+// ─── Helper: per-customer daily-sales aggregation (for general reports) ─────
+// Every "sales figure" endpoint below (KPI, by-region, by-product, by-area,
+// by-territory, customers, insights, deep-insights) reports actual sales
+// volume — never the cumulative *_mtd_sales snapshot. Whether one date or a
+// range is selected, we sum each day's *_yesterday delta (that's the true
+// sales total for the period, single day or many) and take MAX(*_target)
+// (the monthly target is constant across a range, so MAX just recovers that
+// one value without multiplying it by the number of days selected).
+//
+// The result is still aliased as `${key}_mtd_sales` so the JSON response
+// shape / field names stay unchanged for the frontend.
+const PRODUCT_KEYS = ["plc", "plc_plus", "powercrete", "pcc_opc", "hwp", "hcg"];
+
+function perCustomerProductCols(): string {
+  return PRODUCT_KEYS.map((key) => {
+    return `SUM(${key}_yesterday) AS ${key}_mtd_sales, MAX(${key}_target) AS ${key}_target`;
+  }).join(",\n        ");
+}
+
+// Same idea, but for endpoints (like getCustomers) that already group by
+// the exact customer identity in a single pass — no second aggregation
+// level needed, just the daily-sales value column.
+function productValueCols(): string {
+  return PRODUCT_KEYS.map((key) => {
+    return `SUM(${key}_yesterday) AS ${key}_mtd_sales`;
+  }).join(",\n        ");
+}
+
+// ─── Helper: TRUE MTD snapshot aggregation (getMtdTargetByProduct ONLY) ─────
+// This is the one place that's actually supposed to report cumulative MTD
+// vs. target. It must only ever be queried against a single resolved date
+// (see resolveMtdSnapshotFilter) — never summed across multiple upload
+// dates, or it double-counts cumulative snapshots.
+function perCustomerMtdSnapshotCols(): string {
+  return PRODUCT_KEYS.map((key) => {
+    return `SUM(${key}_mtd_sales) AS ${key}_mtd_sales, MAX(${key}_target) AS ${key}_target`;
+  }).join(",\n        ");
+}
+
 async function resolveDateFilter(query: any): Promise<{
   clause: string;
   params: any[];
@@ -63,6 +102,46 @@ async function resolveDateFilter(query: any): Promise<{
     mode: "single",
     defaultDate: latestDate,
   };
+}
+
+// ─── Helper: resolve the single snapshot date for TRUE MTD figures ──────────
+// plc_mtd_sales / plc_target (and the other *_mtd_sales / *_target columns)
+// are a cumulative-as-of-that-upload snapshot, refreshed on every upload.
+// They must never be summed across dates (that adds several cumulative
+// snapshots together) and, unlike the daily *_yesterday figures, a date
+// range can't be handled by summing a delta either — there's no "delta"
+// for a snapshot. So for genuine MTD reporting (e.g. MTD-vs-target), a
+// selected range always collapses down to its latest upload date and reads
+// that one snapshot directly, ignoring the rest of the range.
+async function resolveMtdSnapshotFilter(
+  query: any,
+  base: {
+    clause: string;
+    params: any[];
+    mode: "single" | "range";
+    defaultDate: string | null;
+  },
+): Promise<{ clause: string; params: any[]; mtdDate: string | null }> {
+  if (base.mode === "single") {
+    return {
+      clause: base.clause,
+      params: base.params,
+      mtdDate: base.defaultDate,
+    };
+  }
+
+  const { start_date, end_date } = query;
+  const latest = await pool.query(
+    "SELECT MAX(upload_date)::text AS latest FROM sales_current WHERE upload_date BETWEEN $1 AND $2",
+    [start_date, end_date],
+  );
+  const mtdDate = latest.rows[0]?.latest ?? null;
+
+  if (!mtdDate) {
+    return { clause: "WHERE 1=0", params: [], mtdDate: null };
+  }
+
+  return { clause: "WHERE upload_date = $1", params: [mtdDate], mtdDate };
 }
 
 // ─── Helper: build additional filters ────────────────────────────────────────
@@ -184,23 +263,36 @@ export const getKpi = async (
     const { clause, params, defaultDate } = await resolveDateFilter(req.query);
     const { extra, params: allParams } = buildFilters(req.query, params);
 
+    // Collapse to one row per customer first — see perCustomerProductCols —
+    // so a date range sums daily *_yesterday deltas (never *_mtd_sales) and
+    // recovers the fixed monthly target once per customer via MAX, instead
+    // of multiplying it by the number of days selected.
+    const perCustomerCte = `
+      per_customer AS (
+        SELECT sap_id, customer_name, territory, region,
+          ${perCustomerProductCols()}
+        FROM sales_current
+        ${clause}${extra}
+        GROUP BY sap_id, customer_name, territory, region
+      )`;
+
     const result = await pool.query(
-      `SELECT
+      `WITH ${perCustomerCte}
+       SELECT
         COALESCE(SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales), 0) AS total_sales,
         COUNT(DISTINCT customer_name)                                    AS total_customers,
         COUNT(DISTINCT territory)                                        AS total_territories,
         COALESCE(AVG(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales), 0) AS avg_per_customer
-       FROM sales_current
-       ${clause}${extra}`,
+       FROM per_customer`,
       allParams,
     );
 
     // Top & lowest region
     const regionResult = await pool.query(
-      `SELECT region,
+      `WITH ${perCustomerCte}
+       SELECT region,
         SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
-       FROM sales_current
-       ${clause}${extra}
+       FROM per_customer
        GROUP BY region
        ORDER BY total DESC`,
       allParams,
@@ -208,15 +300,15 @@ export const getKpi = async (
 
     // Top & lowest product
     const productResult = await pool.query(
-      `SELECT
+      `WITH ${perCustomerCte}
+       SELECT
         SUM(plc_mtd_sales)       AS plc_mtd_sales,
         SUM(plc_plus_mtd_sales)  AS plc_plus_mtd_sales,
         SUM(powercrete_mtd_sales)       AS powercrete_mtd_sales,
         SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
         SUM(hwp_mtd_sales)       AS hwp_mtd_sales,
         SUM(hcg_mtd_sales)       AS hcg_mtd_sales
-       FROM sales_current
-       ${clause}${extra}`,
+       FROM per_customer`,
       allParams,
     );
 
@@ -273,7 +365,14 @@ export const getByRegion = async (
     const { extra, params: allParams } = buildFilters(req.query, params);
 
     const result = await pool.query(
-      `SELECT
+      `WITH per_customer AS (
+        SELECT sap_id, region,
+          ${perCustomerProductCols()}
+        FROM sales_current
+        ${clause}${extra}
+        GROUP BY sap_id, region
+      )
+      SELECT
         region,
         SUM(plc_mtd_sales)                                            AS plc_mtd_sales,
         SUM(plc_plus_mtd_sales)                                       AS plc_plus_mtd_sales,
@@ -282,8 +381,7 @@ export const getByRegion = async (
         SUM(hwp_mtd_sales)                                            AS hwp_mtd_sales,
         SUM(hcg_mtd_sales)                                            AS hcg_mtd_sales,
         SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales)  AS total
-       FROM sales_current
-       ${clause}${extra}
+       FROM per_customer
        GROUP BY region
        ORDER BY total DESC`,
       allParams,
@@ -317,15 +415,21 @@ export const getByProduct = async (
     const { extra, params: allParams } = buildFilters(req.query, params);
 
     const result = await pool.query(
-      `SELECT
+      `WITH per_customer AS (
+        SELECT sap_id,
+          ${perCustomerProductCols()}
+        FROM sales_current
+        ${clause}${extra}
+        GROUP BY sap_id
+      )
+      SELECT
         SUM(plc_mtd_sales)       AS plc_mtd_sales,
         SUM(plc_plus_mtd_sales)  AS plc_plus_mtd_sales,
         SUM(powercrete_mtd_sales)       AS powercrete_mtd_sales,
         SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
         SUM(hwp_mtd_sales)       AS hwp_mtd_sales,
         SUM(hcg_mtd_sales)       AS hcg_mtd_sales
-       FROM sales_current
-       ${clause}${extra}`,
+       FROM per_customer`,
       allParams,
     );
 
@@ -371,19 +475,32 @@ export const getMtdTargetByProduct = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const { clause, params, defaultDate } = await resolveDateFilter(req.query);
+    const dateFilter = await resolveDateFilter(req.query);
+    // MTD-vs-target is a snapshot metric — see resolveMtdSnapshotFilter.
+    // A selected range collapses to its latest upload date so we read one
+    // true MTD snapshot instead of summing/blending cumulative values.
+    const { clause, params, mtdDate } = await resolveMtdSnapshotFilter(
+      req.query,
+      dateFilter,
+    );
     const { extra, params: allParams } = buildFilters(req.query, params);
 
     const result = await pool.query(
-      `SELECT
+      `WITH per_customer AS (
+        SELECT sap_id,
+          ${perCustomerMtdSnapshotCols()}
+        FROM sales_current
+        ${clause}${extra}
+        GROUP BY sap_id
+      )
+      SELECT
         SUM(plc_mtd_sales) AS plc_mtd_sales, SUM(plc_target) AS plc_target,
         SUM(plc_plus_mtd_sales) AS plc_plus_mtd_sales, SUM(plc_plus_target) AS plc_plus_target,
         SUM(powercrete_mtd_sales) AS powercrete_mtd_sales, SUM(powercrete_target) AS powercrete_target,
         SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales, SUM(pcc_opc_target) AS pcc_opc_target,
         SUM(hwp_mtd_sales) AS hwp_mtd_sales, SUM(hwp_target) AS hwp_target,
         SUM(hcg_mtd_sales) AS hcg_mtd_sales, SUM(hcg_target) AS hcg_target
-       FROM sales_current
-       ${clause}${extra}`,
+       FROM per_customer`,
       allParams,
     );
 
@@ -431,7 +548,7 @@ export const getMtdTargetByProduct = async (
     const totalTarget = products.reduce((s, p) => s + p.target, 0);
 
     res.json({
-      date_used: defaultDate,
+      date_used: mtdDate,
       total_mtd_sales: totalMtdSales,
       total_target: totalTarget,
       overall_achievement_pct: mtdPctOf(totalMtdSales, totalTarget),
@@ -458,7 +575,14 @@ export const getRegionProductHeatmap = async (
     const { extra, params: allParams } = buildFilters(req.query, params);
 
     const result = await pool.query(
-      `SELECT
+      `WITH per_customer AS (
+        SELECT sap_id, region,
+          ${perCustomerProductCols()}
+        FROM sales_current
+        ${clause}${extra}
+        GROUP BY sap_id, region
+      )
+      SELECT
         region,
         SUM(plc_mtd_sales)       AS plc_mtd_sales,
         SUM(plc_plus_mtd_sales)  AS plc_plus_mtd_sales,
@@ -467,8 +591,7 @@ export const getRegionProductHeatmap = async (
         SUM(hwp_mtd_sales)       AS hwp_mtd_sales,
         SUM(hcg_mtd_sales)       AS hcg_mtd_sales,
         SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
-       FROM sales_current
-       ${clause}${extra}
+       FROM per_customer
        GROUP BY region
        ORDER BY total DESC`,
       allParams,
@@ -502,7 +625,14 @@ export const getByArea = async (
     const { extra, params: allParams } = buildFilters(req.query, params);
 
     const result = await pool.query(
-      `SELECT
+      `WITH per_customer AS (
+        SELECT sap_id, area, region,
+          ${perCustomerProductCols()}
+        FROM sales_current
+        ${clause}${extra}
+        GROUP BY sap_id, area, region
+      )
+      SELECT
         area,
         region,
         SUM(plc_mtd_sales)       AS plc_mtd_sales,
@@ -512,8 +642,7 @@ export const getByArea = async (
         SUM(hwp_mtd_sales)       AS hwp_mtd_sales,
         SUM(hcg_mtd_sales)       AS hcg_mtd_sales,
         SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
-       FROM sales_current
-       ${clause}${extra}
+       FROM per_customer
        GROUP BY area, region
        ORDER BY total DESC`,
       allParams,
@@ -548,7 +677,14 @@ export const getByTerritory = async (
     const { extra, params: allParams } = buildFilters(req.query, params);
 
     const result = await pool.query(
-      `SELECT
+      `WITH per_customer AS (
+        SELECT sap_id, territory, region, area,
+          ${perCustomerProductCols()}
+        FROM sales_current
+        ${clause}${extra}
+        GROUP BY sap_id, territory, region, area
+      )
+      SELECT
         territory,
         region,
         area,
@@ -559,8 +695,7 @@ export const getByTerritory = async (
         SUM(hwp_mtd_sales)       AS hwp_mtd_sales,
         SUM(hcg_mtd_sales)       AS hcg_mtd_sales,
         SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
-       FROM sales_current
-       ${clause}${extra}
+       FROM per_customer
        GROUP BY territory, region, area
        ORDER BY total DESC`,
       allParams,
@@ -604,13 +739,8 @@ export const getCustomers = async (
         tsm_tse,
         asm_kam,
         rsm_b2b_head,
-        SUM(plc_mtd_sales)       AS plc_mtd_sales,
-        SUM(plc_plus_mtd_sales)  AS plc_plus_mtd_sales,
-        SUM(powercrete_mtd_sales)       AS powercrete_mtd_sales,
-        SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
-        SUM(hwp_mtd_sales)       AS hwp_mtd_sales,
-        SUM(hcg_mtd_sales)       AS hcg_mtd_sales,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+        ${productValueCols()},
+        SUM(plc_yesterday + plc_plus_yesterday + powercrete_yesterday + pcc_opc_yesterday + hwp_yesterday + hcg_yesterday) AS total
        FROM sales_current
        ${clause}${extra}
        GROUP BY customer_name, region, area, territory, tsm_tse, asm_kam, rsm_b2b_head
@@ -662,10 +792,16 @@ export const getInsights = async (
     const { clause, params, defaultDate } = await resolveDateFilter(req.query);
     const { extra, params: allParams } = buildFilters(req.query, params);
 
+    // Always the true daily sales total — sum each day's *_yesterday delta,
+    // whether one date or a range is selected. Never sum *_mtd_sales, which
+    // is a cumulative snapshot and would overcount across multiple dates.
+    const totalExpr =
+      "plc_yesterday + plc_plus_yesterday + powercrete_yesterday + pcc_opc_yesterday + hwp_yesterday + hcg_yesterday";
+
     // Regions ranked
     const regionResult = await pool.query(
       `SELECT region,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+        SUM(${totalExpr}) AS total
        FROM sales_current ${clause}${extra}
        GROUP BY region ORDER BY total DESC`,
       allParams,
@@ -674,7 +810,7 @@ export const getInsights = async (
     // Territories ranked
     const territoryResult = await pool.query(
       `SELECT territory,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+        SUM(${totalExpr}) AS total
        FROM sales_current ${clause}${extra}
        GROUP BY territory ORDER BY total DESC`,
       allParams,
@@ -683,7 +819,7 @@ export const getInsights = async (
     // Customers ranked
     const customerResult = await pool.query(
       `SELECT customer_name,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+        SUM(${totalExpr}) AS total
        FROM sales_current ${clause}${extra}
        GROUP BY customer_name ORDER BY total DESC`,
       allParams,
@@ -691,10 +827,7 @@ export const getInsights = async (
 
     // Products total
     const productResult = await pool.query(
-      `SELECT
-        SUM(plc_mtd_sales) AS plc_mtd_sales, SUM(plc_plus_mtd_sales) AS plc_plus_mtd_sales,
-        SUM(powercrete_mtd_sales) AS powercrete_mtd_sales, SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
-        SUM(hwp_mtd_sales) AS hwp_mtd_sales, SUM(hcg_mtd_sales) AS hcg_mtd_sales
+      `SELECT ${productValueCols()}
        FROM sales_current ${clause}${extra}`,
       allParams,
     );
@@ -704,16 +837,9 @@ export const getInsights = async (
     const dependency = await Promise.all(
       regions.map(async (reg) => {
         const depParams = [...allParams, reg.region];
-        const depClause =
-          clause
-            .replace("WHERE", "WHERE region = $" + depParams.length + " AND (")
-            .replace("$1", "$1") + (clause.includes("WHERE 1=0") ? "" : ")");
 
         const r = await pool.query(
-          `SELECT
-            SUM(plc_mtd_sales) AS plc_mtd_sales, SUM(plc_plus_mtd_sales) AS plc_plus_mtd_sales,
-            SUM(powercrete_mtd_sales) AS powercrete_mtd_sales, SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
-            SUM(hwp_mtd_sales) AS hwp_mtd_sales, SUM(hcg_mtd_sales) AS hcg_mtd_sales
+          `SELECT ${productValueCols()}
            FROM sales_current
            ${clause}${extra} AND region = $${depParams.length}`,
           depParams,
@@ -806,11 +932,19 @@ export const getDeepInsights = async (
     const { clause, params, defaultDate } = await resolveDateFilter(req.query);
     const { extra, params: allParams } = buildFilters(req.query, params);
 
+    // Always the true daily sales total — sum each day's *_yesterday delta,
+    // whether one date or a range is selected. Never sum *_mtd_sales, which
+    // is a cumulative snapshot and would overcount across multiple dates.
+    const totalExpr =
+      "plc_yesterday + plc_plus_yesterday + powercrete_yesterday + pcc_opc_yesterday + hwp_yesterday + hcg_yesterday";
+    // Same idea for a single product's column, e.g. "plc_yesterday".
+    const productCol = (key: string) => `${key}_yesterday`;
+
     // ── 1. Bottom 5 TSM/TSE ──────────────────────────────────────────────────
     const bottomTsm = await pool.query(
       `SELECT tsm_tse,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+        SUM(${totalExpr}) AS total
        FROM sales_current ${clause}${extra}
        AND tsm_tse NOT ILIKE '%vacant%'
        AND tsm_tse != ''
@@ -824,7 +958,7 @@ export const getDeepInsights = async (
     const bottomAsm = await pool.query(
       `SELECT asm_kam,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+        SUM(${totalExpr}) AS total
        FROM sales_current ${clause}${extra}
        AND asm_kam != ''
        GROUP BY asm_kam
@@ -837,7 +971,7 @@ export const getDeepInsights = async (
     const bottomRsm = await pool.query(
       `SELECT rsm_b2b_head,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+        SUM(${totalExpr}) AS total
        FROM sales_current ${clause}${extra}
        AND rsm_b2b_head != ''
        GROUP BY rsm_b2b_head
@@ -849,7 +983,7 @@ export const getDeepInsights = async (
     // ── 4. Bottom 5 customers ─────────────────────────────────────────────────
     const bottomCustomers = await pool.query(
       `SELECT customer_name, region, area, territory, tsm_tse, asm_kam,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+        SUM(${totalExpr}) AS total
        FROM sales_current ${clause}${extra}
        GROUP BY customer_name, region, area, territory, tsm_tse, asm_kam
        ORDER BY total ASC
@@ -861,7 +995,7 @@ export const getDeepInsights = async (
     const bottomTerritories = await pool.query(
       `SELECT territory, region, area,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+        SUM(${totalExpr}) AS total
        FROM sales_current ${clause}${extra}
        GROUP BY territory, region, area
        ORDER BY total ASC
@@ -873,7 +1007,7 @@ export const getDeepInsights = async (
     const topTsm = await pool.query(
       `SELECT tsm_tse,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+        SUM(${totalExpr}) AS total
       FROM sales_current ${clause}${extra}
       AND tsm_tse NOT ILIKE '%vacant%'
       AND tsm_tse != ''
@@ -887,7 +1021,7 @@ export const getDeepInsights = async (
     const topAsm = await pool.query(
       `SELECT asm_kam,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+        SUM(${totalExpr}) AS total
       FROM sales_current ${clause}${extra}
       AND asm_kam != ''
       GROUP BY asm_kam
@@ -900,7 +1034,7 @@ export const getDeepInsights = async (
     const topRsm = await pool.query(
       `SELECT rsm_b2b_head,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+        SUM(${totalExpr}) AS total
       FROM sales_current ${clause}${extra}
       AND rsm_b2b_head != ''
       GROUP BY rsm_b2b_head
@@ -912,7 +1046,7 @@ export const getDeepInsights = async (
     // ── 4b. Top 5 customers ─────────────────────────────────────────────────
     const topCustomers = await pool.query(
       `SELECT customer_name, region, area, territory, tsm_tse, asm_kam,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+        SUM(${totalExpr}) AS total
       FROM sales_current ${clause}${extra}
       GROUP BY customer_name, region, area, territory, tsm_tse, asm_kam
       ORDER BY total DESC
@@ -924,7 +1058,7 @@ export const getDeepInsights = async (
     const topTerritories = await pool.query(
       `SELECT territory, region, area,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+        SUM(${totalExpr}) AS total
       FROM sales_current ${clause}${extra}
       GROUP BY territory, region, area
       ORDER BY total DESC
@@ -936,7 +1070,7 @@ export const getDeepInsights = async (
     const vacantTsm = await pool.query(
       `SELECT territory, region, area,
         COUNT(DISTINCT customer_name) AS customers,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+        SUM(${totalExpr}) AS total
        FROM sales_current ${clause}${extra}
        AND tsm_tse ILIKE '%vacant%'
        GROUP BY territory, region, area
@@ -946,7 +1080,7 @@ export const getDeepInsights = async (
 
     // ── 7. Zero/low sales customers (bottom 10%) ──────────────────────────────
     const avgResult = await pool.query(
-      `SELECT AVG(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS avg
+      `SELECT AVG(${totalExpr}) AS avg
        FROM sales_current ${clause}${extra}`,
       allParams,
     );
@@ -955,33 +1089,27 @@ export const getDeepInsights = async (
 
     const lowSalesCustomers = await pool.query(
       `SELECT customer_name, region, area, territory, tsm_tse,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+        SUM(${totalExpr}) AS total
        FROM sales_current ${clause}${extra}
        GROUP BY customer_name, region, area, territory, tsm_tse
-       HAVING SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) <= $${allParams.length + 1}
+       HAVING SUM(${totalExpr}) <= $${allParams.length + 1}
        ORDER BY total ASC
        LIMIT 20`,
       [...allParams, threshold],
     );
 
     // ── 8. Single product customers (upsell opportunity) ─────────────────────
+    const productBuyingCase = PRODUCT_KEYS.map(
+      (key) => `CASE WHEN SUM(${productCol(key)}) > 0 THEN 1 ELSE 0 END`,
+    ).join(" +\n         ");
+
     const singleProductCustomers = await pool.query(
       `SELECT customer_name, region, area, territory, tsm_tse,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total,
-        (CASE WHEN SUM(plc_mtd_sales) > 0 THEN 1 ELSE 0 END +
-         CASE WHEN SUM(plc_plus_mtd_sales) > 0 THEN 1 ELSE 0 END +
-         CASE WHEN SUM(powercrete_mtd_sales) > 0 THEN 1 ELSE 0 END +
-         CASE WHEN SUM(pcc_opc_mtd_sales) > 0 THEN 1 ELSE 0 END +
-         CASE WHEN SUM(hwp_mtd_sales) > 0 THEN 1 ELSE 0 END +
-         CASE WHEN SUM(hcg_mtd_sales) > 0 THEN 1 ELSE 0 END) AS products_buying
+        SUM(${totalExpr}) AS total,
+        (${productBuyingCase}) AS products_buying
        FROM sales_current ${clause}${extra}
        GROUP BY customer_name, region, area, territory, tsm_tse
-       HAVING (CASE WHEN SUM(plc_mtd_sales) > 0 THEN 1 ELSE 0 END +
-               CASE WHEN SUM(plc_plus_mtd_sales) > 0 THEN 1 ELSE 0 END +
-               CASE WHEN SUM(powercrete_mtd_sales) > 0 THEN 1 ELSE 0 END +
-               CASE WHEN SUM(pcc_opc_mtd_sales) > 0 THEN 1 ELSE 0 END +
-               CASE WHEN SUM(hwp_mtd_sales) > 0 THEN 1 ELSE 0 END +
-               CASE WHEN SUM(hcg_mtd_sales) > 0 THEN 1 ELSE 0 END) = 1
+       HAVING (${productBuyingCase}) = 1
        ORDER BY total DESC
        LIMIT 20`,
       allParams,
@@ -991,7 +1119,7 @@ export const getDeepInsights = async (
     const concentrationResult = await pool.query(
       `WITH ranked AS (
         SELECT customer_name,
-          SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+          SUM(${totalExpr}) AS total
         FROM sales_current ${clause}${extra}
         GROUP BY customer_name
         ORDER BY total DESC
@@ -1014,11 +1142,8 @@ export const getDeepInsights = async (
 
     // ── 10. Product concentration risk ───────────────────────────────────────
     const productResult = await pool.query(
-      `SELECT
-        SUM(plc_mtd_sales) AS plc_mtd_sales, SUM(plc_plus_mtd_sales) AS plc_plus_mtd_sales,
-        SUM(powercrete_mtd_sales) AS powercrete_mtd_sales, SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
-        SUM(hwp_mtd_sales) AS hwp_mtd_sales, SUM(hcg_mtd_sales) AS hcg_mtd_sales,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+      `SELECT ${productValueCols()},
+        SUM(${totalExpr}) AS total
        FROM sales_current ${clause}${extra}`,
       allParams,
     );
@@ -1045,8 +1170,8 @@ export const getDeepInsights = async (
       `SELECT tsm_tse,
         COUNT(DISTINCT customer_name) AS customers,
         COUNT(DISTINCT territory)     AS territories,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total,
-        AVG(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS avg_per_customer
+        SUM(${totalExpr}) AS total,
+        AVG(${totalExpr}) AS avg_per_customer
        FROM sales_current ${clause}${extra}
        AND tsm_tse NOT ILIKE '%vacant%'
        AND tsm_tse != ''
@@ -1058,7 +1183,7 @@ export const getDeepInsights = async (
     const tsmCustomerStats = await pool.query(
       `WITH customer_totals AS (
         SELECT tsm_tse, customer_name,
-          SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+          SUM(${totalExpr}) AS total
         FROM sales_current ${clause}${extra}
         AND tsm_tse NOT ILIKE '%vacant%'
         AND tsm_tse != ''
@@ -1083,7 +1208,7 @@ export const getDeepInsights = async (
     // ── 12. Region concentration risk ────────────────────────────────────────
     const regionResult = await pool.query(
       `SELECT region,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+        SUM(${totalExpr}) AS total
        FROM sales_current ${clause}${extra}
        GROUP BY region
        ORDER BY total DESC`,
@@ -1103,7 +1228,7 @@ export const getDeepInsights = async (
       `WITH territory_totals AS (
         SELECT territory, region, area,
           COUNT(DISTINCT customer_name) AS customers,
-          SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+          SUM(${totalExpr}) AS total
         FROM sales_current ${clause}${extra}
         GROUP BY territory, region, area
       ),
@@ -1316,6 +1441,17 @@ const YESTERDAY_PRODUCT_NAME_MAP: Record<string, string> = {
 const pctOf = (numerator: number, denominator: number): number =>
   denominator ? Number(((numerator / denominator) * 100).toFixed(2)) : 0;
 
+// Target is a fixed monthly value re-uploaded every day. When grouping
+// across multiple customers (by region/territory/product/overall), we must
+// collapse to one row per customer first — MAX recovers the constant value
+// per customer — before summing across customers. Otherwise a date range
+// multiplies the target by however many days are in it.
+function perCustomerTargetCols(): string {
+  return PRODUCT_KEYS.map((key) => `MAX(${key}_target) AS ${key}_target`).join(
+    ", ",
+  );
+}
+
 // ─── GET /api/sales/yesterday/kpi ─────────────────────────────────────────────
 export const getYesterdayKpi = async (
   req: AuthRequest,
@@ -1328,12 +1464,24 @@ export const getYesterdayKpi = async (
     const result = await pool.query(
       `SELECT
         COALESCE(SUM(${YESTERDAY_SUM_EXPR}), 0) AS total_yesterday,
-        COALESCE(SUM(${TARGET_SUM_EXPR}), 0)    AS total_target,
         COUNT(DISTINCT customer_name)             AS total_customers,
         COUNT(DISTINCT territory)                 AS total_territories,
         COALESCE(AVG(${YESTERDAY_SUM_EXPR}), 0) AS avg_per_customer
        FROM sales_current
        ${clause}${extra}`,
+      allParams,
+    );
+
+    // See perCustomerTargetCols — collapse to one row per customer before
+    // summing the fixed monthly target across customers.
+    const targetResult = await pool.query(
+      `WITH per_customer AS (
+        SELECT sap_id, ${perCustomerTargetCols()}
+        FROM sales_current
+        ${clause}${extra}
+        GROUP BY sap_id
+      )
+      SELECT COALESCE(SUM(${TARGET_SUM_EXPR}), 0) AS total_target FROM per_customer`,
       allParams,
     );
 
@@ -1361,7 +1509,7 @@ export const getYesterdayKpi = async (
 
     const row = result.rows[0];
     const totalYesterday = Number(row.total_yesterday);
-    const totalTarget = Number(row.total_target);
+    const totalTarget = Number(targetResult.rows[0]?.total_target ?? 0);
     const regions = regionResult.rows;
     const products = productResult.rows[0] ?? {};
 
@@ -1421,8 +1569,7 @@ export const getYesterdayByRegion = async (
         SUM(pcc_opc_yesterday) AS pcc_opc_yesterday,
         SUM(hwp_yesterday)       AS hwp_yesterday,
         SUM(hcg_yesterday)       AS hcg_yesterday,
-        SUM(${YESTERDAY_SUM_EXPR}) AS total_yesterday,
-        SUM(${TARGET_SUM_EXPR})    AS total_target
+        SUM(${YESTERDAY_SUM_EXPR}) AS total_yesterday
        FROM sales_current
        ${clause}${extra}
        GROUP BY region
@@ -1430,11 +1577,29 @@ export const getYesterdayByRegion = async (
       allParams,
     );
 
+    // See perCustomerTargetCols — collapse to one row per customer before
+    // summing the fixed monthly target across customers in each region.
+    const targetResult = await pool.query(
+      `WITH per_customer AS (
+        SELECT sap_id, region, ${perCustomerTargetCols()}
+        FROM sales_current
+        ${clause}${extra}
+        GROUP BY sap_id, region
+      )
+      SELECT region, SUM(${TARGET_SUM_EXPR}) AS total_target
+      FROM per_customer
+      GROUP BY region`,
+      allParams,
+    );
+    const targetByRegion = new Map(
+      targetResult.rows.map((r) => [r.region, Number(r.total_target)]),
+    );
+
     res.json({
       date_used: defaultDate,
       data: result.rows.map((r) => {
         const totalYesterday = Number(r.total_yesterday);
-        const totalTarget = Number(r.total_target);
+        const totalTarget = targetByRegion.get(r.region) ?? 0;
         return {
           region: r.region,
           plc_mtd_sales: Number(r.plc_yesterday),
@@ -1466,18 +1631,39 @@ export const getYesterdayByProduct = async (
 
     const result = await pool.query(
       `SELECT
-        SUM(plc_yesterday) AS plc_yesterday, SUM(plc_target) AS plc_target,
-        SUM(plc_plus_yesterday) AS plc_plus_yesterday, SUM(plc_plus_target) AS plc_plus_target,
-        SUM(powercrete_yesterday) AS powercrete_yesterday, SUM(powercrete_target) AS powercrete_target,
-        SUM(pcc_opc_yesterday) AS pcc_opc_yesterday, SUM(pcc_opc_target) AS pcc_opc_target,
-        SUM(hwp_yesterday) AS hwp_yesterday, SUM(hwp_target) AS hwp_target,
-        SUM(hcg_yesterday) AS hcg_yesterday, SUM(hcg_target) AS hcg_target
+        SUM(plc_yesterday) AS plc_yesterday,
+        SUM(plc_plus_yesterday) AS plc_plus_yesterday,
+        SUM(powercrete_yesterday) AS powercrete_yesterday,
+        SUM(pcc_opc_yesterday) AS pcc_opc_yesterday,
+        SUM(hwp_yesterday) AS hwp_yesterday,
+        SUM(hcg_yesterday) AS hcg_yesterday
        FROM sales_current
        ${clause}${extra}`,
       allParams,
     );
 
+    // See perCustomerTargetCols — collapse to one row per customer before
+    // summing the fixed monthly target across customers.
+    const targetResult = await pool.query(
+      `WITH per_customer AS (
+        SELECT sap_id, ${perCustomerTargetCols()}
+        FROM sales_current
+        ${clause}${extra}
+        GROUP BY sap_id
+      )
+      SELECT
+        SUM(plc_target) AS plc_target,
+        SUM(plc_plus_target) AS plc_plus_target,
+        SUM(powercrete_target) AS powercrete_target,
+        SUM(pcc_opc_target) AS pcc_opc_target,
+        SUM(hwp_target) AS hwp_target,
+        SUM(hcg_target) AS hcg_target
+       FROM per_customer`,
+      allParams,
+    );
+
     const row = result.rows[0];
+    const targetRow = targetResult.rows[0] ?? {};
     const totalYesterday =
       Number(row.plc_yesterday) +
       Number(row.plc_plus_yesterday) +
@@ -1490,32 +1676,32 @@ export const getYesterdayByProduct = async (
       {
         name: "PLC",
         value: Number(row.plc_yesterday),
-        target: Number(row.plc_target),
+        target: Number(targetRow.plc_target),
       },
       {
         name: "PLC+",
         value: Number(row.plc_plus_yesterday),
-        target: Number(row.plc_plus_target),
+        target: Number(targetRow.plc_plus_target),
       },
       {
         name: "Powercrete",
         value: Number(row.powercrete_yesterday),
-        target: Number(row.powercrete_target),
+        target: Number(targetRow.powercrete_target),
       },
       {
         name: "PCC + OPC",
         value: Number(row.pcc_opc_yesterday),
-        target: Number(row.pcc_opc_target),
+        target: Number(targetRow.pcc_opc_target),
       },
       {
         name: "HWP",
         value: Number(row.hwp_yesterday),
-        target: Number(row.hwp_target),
+        target: Number(targetRow.hwp_target),
       },
       {
         name: "HCG",
         value: Number(row.hcg_yesterday),
-        target: Number(row.hcg_target),
+        target: Number(targetRow.hcg_target),
       },
     ].sort((a, b) => b.value - a.value);
 
@@ -1550,8 +1736,7 @@ export const getYesterdayByTerritory = async (
         territory,
         region,
         area,
-        SUM(${YESTERDAY_SUM_EXPR}) AS total_yesterday,
-        SUM(${TARGET_SUM_EXPR})    AS total_target
+        SUM(${YESTERDAY_SUM_EXPR}) AS total_yesterday
        FROM sales_current
        ${clause}${extra}
        GROUP BY territory, region, area
@@ -1559,11 +1744,34 @@ export const getYesterdayByTerritory = async (
       allParams,
     );
 
+    // See perCustomerTargetCols — collapse to one row per customer before
+    // summing the fixed monthly target across customers in each territory.
+    const targetResult = await pool.query(
+      `WITH per_customer AS (
+        SELECT sap_id, territory, region, area, ${perCustomerTargetCols()}
+        FROM sales_current
+        ${clause}${extra}
+        GROUP BY sap_id, territory, region, area
+      )
+      SELECT territory, region, area, SUM(${TARGET_SUM_EXPR}) AS total_target
+      FROM per_customer
+      GROUP BY territory, region, area`,
+      allParams,
+    );
+    const targetKey = (t: {
+      territory: string;
+      region: string;
+      area: string;
+    }) => `${t.territory}||${t.region}||${t.area}`;
+    const targetByTerritory = new Map(
+      targetResult.rows.map((r) => [targetKey(r), Number(r.total_target)]),
+    );
+
     res.json({
       date_used: defaultDate,
       data: result.rows.map((r) => {
         const totalYesterday = Number(r.total_yesterday);
-        const totalTarget = Number(r.total_target);
+        const totalTarget = targetByTerritory.get(targetKey(r)) ?? 0;
         return {
           territory: r.territory,
           region: r.region,
@@ -1599,7 +1807,7 @@ export const getYesterdayCustomers = async (
         asm_kam,
         rsm_b2b_head,
         SUM(${YESTERDAY_SUM_EXPR}) AS total_yesterday,
-        SUM(${TARGET_SUM_EXPR})    AS total_target
+        MAX(${TARGET_SUM_EXPR})    AS total_target
        FROM sales_current
        ${clause}${extra}
        GROUP BY customer_name, region, area, territory, tsm_tse, asm_kam, rsm_b2b_head

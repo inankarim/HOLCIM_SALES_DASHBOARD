@@ -13,6 +13,11 @@ import {
   getAvailableDates,
   getFilterOptions,
   getDeepInsights,
+  getYesterdayKpi,
+  getYesterdayByRegion,
+  getYesterdayByProduct,
+  getYesterdayByTerritory,
+  getYesterdayCustomers,
 } from "../controllers/salesController";
 
 const router = Router();
@@ -43,6 +48,15 @@ router.get("/sales/customers", getCustomers);
 router.get("/sales/insights", getInsights);
 
 //deepInsights
-
 router.get("/sales/insights/deep", getDeepInsights);
+
+// D-1 daily report (Yesterday Sales vs Target) — separate from the MTD
+// views above; each upload's *_yesterday columns are that day's actual
+// sales, so these are correct for both a single date and a date range.
+router.get("/sales/yesterday/kpi", getYesterdayKpi);
+router.get("/sales/yesterday/by-region", getYesterdayByRegion);
+router.get("/sales/yesterday/by-product", getYesterdayByProduct);
+router.get("/sales/yesterday/by-territory", getYesterdayByTerritory);
+router.get("/sales/yesterday/customers", getYesterdayCustomers);
+
 export default router;

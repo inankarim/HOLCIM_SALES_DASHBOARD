@@ -3,6 +3,7 @@ import { KpiRow } from "../components/shared/kpiRow";
 import { RegionChart } from "../components/charts/RegionChart";
 import { ProductMixChart } from "../components/charts/ProductMixChart";
 import { ProductComparisonChart } from "../components/charts/ProductComparisonChart";
+import { TargetAttainmentChart } from "../components/charts/ Targetattainmentchart";
 import { HeatmapChart } from "../components/charts/HeatmapChart";
 import { AreaChart } from "../components/charts/AreaChart";
 import { TerritoryChart } from "../components/charts/TerritoryChart";
@@ -107,6 +108,10 @@ export function AdminReportPage({ uploadDate, onBack, onEmailSent }: Props) {
             <div id="chart-product-comparison" className="overflow-x-auto">
               <ProductComparisonChart filters={filters} />
             </div>
+          </div>
+
+          <div id="chart-target-attainment" className="overflow-x-auto">
+            <TargetAttainmentChart filters={filters} />
           </div>
 
           <div id="chart-heatmap" className="overflow-x-auto">

@@ -1,4 +1,5 @@
 import http from "./axios"
+
 export interface FilterParams {
   date?: string
   start_date?: string
@@ -21,8 +22,7 @@ export interface EmailRecipient {
 }
 
 export const salesApi = {
-  // Get available dates
-  getDates: () => http.get("/api/sales/dates"),
+  // ── Auth ────────────────────────────────────────────────────────────────────
 
   login: (email: string, password: string) =>
     http.post("/api/auth/login", { email, password }),
@@ -30,50 +30,130 @@ export const salesApi = {
   register: (name: string, email: string, password: string) =>
     http.post("/api/auth/register", { name, email, password }),
 
-  // Get filter options (cascading)
+  // ── Dates ───────────────────────────────────────────────────────────────────
+  // GET /api/sales/dates → getAvailableDates
+  // Returns: { dates: string[] }
+
+  getDates: () => http.get("/api/sales/dates"),
+
+  // ── Filters ─────────────────────────────────────────────────────────────────
+  // GET /api/sales/filter-options → getFilterOptions
+  // Returns: { date_used, counts, options: { regions, areas, territories,
+  //            tsm_tse, asm_kam, rsm_b2b_head, customers } }
+
   getFilterOptions: (params: FilterParams) =>
     http.get("/api/sales/filter-options", { params }),
 
-  // Get KPIs
+  // ── MTD Sales endpoints ─────────────────────────────────────────────────────
+
+  // GET /api/sales/kpi → getKpi
+  // Returns: { date_used, total_sales, total_customers, total_territories,
+  //            avg_per_customer, top_region, lowest_region,
+  //            top_product, lowest_product }
   getKpi: (params: FilterParams) => http.get("/api/sales/kpi", { params }),
 
-  // Get sales by region
+  // GET /api/sales/by-region → getByRegion
+  // Returns: { date_used, data: [{ region, plc_mtd_sales, plc_plus_mtd_sales,
+  //            powercrete_mtd_sales, pcc_opc_mtd_sales, hwp_mtd_sales,
+  //            hcg_mtd_sales, total }] }
   getByRegion: (params: FilterParams) =>
     http.get("/api/sales/by-region", { params }),
 
-  // Get sales by product
+  // GET /api/sales/by-product → getByProduct
+  // Returns: { date_used, total, data: [{ name, value, pct }] }
+  // name values: "PLC", "PLC+", "Powercrete", "PCC + OPC", "HWP", "HCG"
   getByProduct: (params: FilterParams) =>
     http.get("/api/sales/by-product", { params }),
 
-  // Get MTD sales vs target per product, with achievement %
+  // GET /api/sales/mtd-target-by-product → getMtdTargetByProduct
+  // Returns: { date_used, total_mtd_sales, total_target,
+  //            overall_achievement_pct,
+  //            data: [{ key, name, mtd_sales, target, achievement_pct }] }
+  // Sorted worst achievement first.
   getMtdTargetByProduct: (params: FilterParams) =>
     http.get("/api/sales/mtd-target-by-product", { params }),
 
-  // Get region product heatmap
+  // GET /api/sales/region-product-heatmap → getRegionProductHeatmap
+  // Returns: { date_used, data: [{ region, plc_mtd_sales, plc_plus_mtd_sales,
+  //            powercrete_mtd_sales, pcc_opc_mtd_sales, hwp_mtd_sales,
+  //            hcg_mtd_sales, total }] }
   getHeatmap: (params: FilterParams) =>
     http.get("/api/sales/region-product-heatmap", { params }),
 
-  // Get sales by area
+  // GET /api/sales/by-area → getByArea
+  // Returns: { date_used, data: [{ area, region, plc_mtd_sales,
+  //            plc_plus_mtd_sales, powercrete_mtd_sales, pcc_opc_mtd_sales,
+  //            hwp_mtd_sales, hcg_mtd_sales, total }] }
   getByArea: (params: FilterParams) =>
     http.get("/api/sales/by-area", { params }),
 
-  // Get sales by territory
+  // GET /api/sales/by-territory → getByTerritory
+  // Returns: { date_used, data: [{ territory, region, area, plc_mtd_sales,
+  //            plc_plus_mtd_sales, powercrete_mtd_sales, pcc_opc_mtd_sales,
+  //            hwp_mtd_sales, hcg_mtd_sales, total }] }
   getByTerritory: (params: FilterParams) =>
     http.get("/api/sales/by-territory", { params }),
 
-  // Get customer data
+  // GET /api/sales/customers → getCustomers
+  // Returns: { date_used, total_customers, grand_total, top5, bottom5,
+  //            data: [{ customer_name, region, area, territory, tsm_tse,
+  //            asm_kam, rsm_b2b_head, plc_mtd_sales, ..., total, pct_share }] }
   getCustomers: (params: FilterParams) =>
     http.get("/api/sales/customers", { params }),
 
-  // Get insights
+  // GET /api/sales/insights → getInsights
+  // Returns: { date_used, best_region, worst_region, weakest_territory,
+  //            top_customer, lowest_customer, most_sold_product,
+  //            least_sold_product, product_dependency }
   getInsights: (params: FilterParams) =>
     http.get("/api/sales/insights", { params }),
 
-  // Get deep insights
+  // GET /api/sales/insights/deep → getDeepInsights
+  // Returns: { date_used, failures, performers, opportunities, risks,
+  //            efficiency }
   getDeepInsights: (params: FilterParams) =>
     http.get("/api/sales/insights/deep", { params }),
 
-  // Send dashboard email
+  // ── D-1 Yesterday / Daily report endpoints ──────────────────────────────────
+
+  // GET /api/sales/yesterday/kpi → getYesterdayKpi
+  // Returns: { date_used, total_yesterday_sales, total_target,
+  //            achievement_pct, total_customers, total_territories,
+  //            avg_per_customer, top_region, lowest_region,
+  //            top_product, lowest_product }
+  getYesterdayKpi: (params: FilterParams) =>
+    http.get("/api/sales/yesterday/kpi", { params }),
+
+  // GET /api/sales/yesterday/by-region → getYesterdayByRegion
+  // Returns: { date_used, data: [{ region, plc_mtd_sales, ..., hcg_mtd_sales,
+  //            total_yesterday, total_target, achievement_pct }] }
+  // Note: controller aliases yesterday cols as *_mtd_sales for frontend compat
+  getYesterdayByRegion: (params: FilterParams) =>
+    http.get("/api/sales/yesterday/by-region", { params }),
+
+  // GET /api/sales/yesterday/by-product → getYesterdayByProduct
+  // Returns: { date_used, total_yesterday,
+  //            data: [{ name, value, target, achievement_pct, pct_of_total }] }
+  getYesterdayByProduct: (params: FilterParams) =>
+    http.get("/api/sales/yesterday/by-product", { params }),
+
+  // GET /api/sales/yesterday/by-territory → getYesterdayByTerritory
+  // Returns: { date_used, data: [{ territory, region, area,
+  //            total_yesterday, total_target, achievement_pct }] }
+  getYesterdayByTerritory: (params: FilterParams) =>
+    http.get("/api/sales/yesterday/by-territory", { params }),
+
+  // GET /api/sales/yesterday/customers → getYesterdayCustomers
+  // Returns: { date_used, total_customers, grand_total_yesterday,
+  //            top5, bottom5, data: [{ customer_name, region, area,
+  //            territory, tsm_tse, asm_kam, rsm_b2b_head,
+  //            total_yesterday, total_target, achievement_pct, pct_share }] }
+  getYesterdayCustomers: (params: FilterParams) =>
+    http.get("/api/sales/yesterday/customers", { params }),
+
+  // ── Email ───────────────────────────────────────────────────────────────────
+
+  // POST /api/email/send
   sendDashboardEmail: (payload: {
     to: string[]
     cc?: string
@@ -81,7 +161,8 @@ export const salesApi = {
     charts?: { name: string; base64: string }[]
   }) => http.post("/api/email/send", payload),
 
-  // Saved email recipients (admin only)
+  // ── Saved email recipients (admin only) ─────────────────────────────────────
+
   getEmailRecipients: () =>
     http.get<{ recipients: EmailRecipient[] }>("/api/email-recipients"),
 
@@ -91,49 +172,34 @@ export const salesApi = {
   deleteEmailRecipient: (id: number) =>
     http.delete(`/api/email-recipients/${id}`),
 
-  // Upload file
-  // Upload file with security checks
-  // Upload both source files with security checks
+  // ── File upload ─────────────────────────────────────────────────────────────
+
+  // POST /api/upload (multipart: file_a, file_b, upload_date)
   uploadFiles: async (fileA: File, fileB: File, uploadDate: string) => {
-    const MAX_SIZE = 70 * 1024 * 1024 // 10MB
+    const MAX_SIZE = 70 * 1024 * 1024 // 70 MB
 
     const validateFile = async (file: File, label: string): Promise<void> => {
-      // 1. Check file extension — only .xlsx for the two-file merge flow
-      const fileName = file.name.toLowerCase()
-      if (!fileName.endsWith(".xlsx")) {
+      if (!file.name.toLowerCase().endsWith(".xlsx")) {
         throw new Error(`${label}: only .xlsx files are allowed.`)
       }
-
-      // 2. Check file size
       if (file.size > MAX_SIZE) {
-        throw new Error(`${label}: file size must be under 10MB.`)
+        throw new Error(`${label}: file size must be under 70 MB.`)
       }
-
-      // 3. Check magic bytes (real file signature) — .xlsx is a zip archive,
-      // so its first 4 bytes are always the zip signature 50 4B 03 04.
+      // Verify real XLSX magic bytes (PK zip header 50 4B 03 04)
       const buffer = await file.slice(0, 8).arrayBuffer()
-      const bytes = new Uint8Array(buffer)
-      const hex = Array.from(bytes)
+      const hex = Array.from(new Uint8Array(buffer))
         .map((b) => b.toString(16).padStart(2, "0"))
         .join("")
-      const isXLSX = hex.startsWith("504b0304")
-
-      if (!isXLSX) {
+      if (!hex.startsWith("504b0304")) {
         throw new Error(`${label}: file is not a valid XLSX file.`)
       }
     }
 
-    try {
-      await validateFile(fileA, "First file")
-      await validateFile(fileB, "Second file")
-    } catch (err) {
-      return Promise.reject(err)
-    }
+    await validateFile(fileA, "First file")
+    await validateFile(fileB, "Second file")
 
-    // 4. Validate date format
-    const datePattern = /^\d{4}-\d{2}-\d{2}$/
-    if (!datePattern.test(uploadDate)) {
-      return Promise.reject(new Error("Invalid date format. Use YYYY-MM-DD."))
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(uploadDate)) {
+      throw new Error("Invalid date format. Use YYYY-MM-DD.")
     }
 
     const formData = new FormData()

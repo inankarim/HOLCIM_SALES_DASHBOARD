@@ -5,6 +5,8 @@ export function buildDashboardEmail(data: {
   byRegion: any[];
   byProduct: any[];
   deepInsights: any;
+  mtdTarget?: any;
+  allAreas?: any[];
   charts?: { name: string; base64: string }[];
   dashboardUrl?: string;
 }): string {
@@ -15,6 +17,8 @@ export function buildDashboardEmail(data: {
     byRegion,
     byProduct,
     deepInsights,
+    mtdTarget,
+    allAreas = [],
     charts = [],
     dashboardUrl,
   } = data;
@@ -147,11 +151,15 @@ export function buildDashboardEmail(data: {
     )
     .join("");
 
-  const areaRows = (deepInsights?.failures?.bottom5_territories || [])
+  // Full area-level rollup (every area, best-to-worst) — this used to
+  // incorrectly reuse deepInsights' bottom5_territories (only 5 rows,
+  // duplicating the Bottom Performers section below). Now it's the real,
+  // complete area list.
+  const areaRows = allAreas
     .map(
       (r: any, i: number) => `
       <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"}">
-        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;white-space:nowrap">${r.territory}</td>
+        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;white-space:nowrap">${r.area}</td>
         <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;white-space:nowrap">${r.region}</td>
         <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:center">${r.customers}</td>
         <td style="padding:10px 14px;font-size:13px;font-weight:700;color:#1d4370;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${formatNum(Number(r.total))}</td>
@@ -159,11 +167,54 @@ export function buildDashboardEmail(data: {
     )
     .join("");
 
+  // Top 5 areas — written out as a real table (not just left to the chart
+  // image) so it reads correctly even for recipients whose mail client
+  // blocks images.
+  const top5AreaRows = allAreas
+    .slice(0, 5)
+    .map(
+      (r: any, i: number) => `
+      <tr style="background:${i % 2 === 0 ? "#f0fdf4" : "#ffffff"}">
+        <td style="padding:8px 12px;font-size:12px;color:#1e293b;border-bottom:1px solid #bbf7d0">${r.area}</td>
+        <td style="padding:8px 12px;font-size:12px;color:#1e293b;border-bottom:1px solid #bbf7d0">${r.region}</td>
+        <td style="padding:8px 12px;font-size:12px;color:#1e293b;border-bottom:1px solid #bbf7d0;text-align:center">${r.customers}</td>
+        <td style="padding:8px 12px;font-size:12px;color:#16a34a;font-weight:700;border-bottom:1px solid #bbf7d0;text-align:right">${formatNum(Number(r.total))}</td>
+      </tr>`,
+    )
+    .join("");
+
+  const mtdTargetRows = (mtdTarget?.data || [])
+    .map((p: any) => {
+      const pct = Number(p.achievement_pct) || 0;
+      const color = pct >= 100 ? "#16a34a" : pct >= 75 ? "#f59e0b" : "#dc2626";
+      const barBg = pct >= 100 ? "#dcfce7" : pct >= 75 ? "#fef3c7" : "#fee2e2";
+      const barWidth = Math.max(0, Math.min(100, pct));
+      return `
+      <tr style="background:#ffffff">
+        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;white-space:nowrap">${p.name}</td>
+        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${formatNum(p.mtd_sales)}</td>
+        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${formatNum(p.target)}</td>
+        <td style="padding:10px 14px;font-size:13px;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">
+          <div style="display:inline-flex;align-items:center;gap:6px">
+            <div style="width:60px;height:6px;border-radius:3px;background:${barBg};overflow:hidden">
+              <div style="width:${barWidth}%;height:100%;background:${color}"></div>
+            </div>
+            <span style="font-weight:700;color:${color}">${pct.toFixed(1)}%</span>
+          </div>
+        </td>
+      </tr>`;
+    })
+    .join("");
+
   // Chart lookups — adjust keywords to match your actual chart names
   const regionChart = getChart("region");
   const productPieChart =
     getChart("product") || getChart("pie") || getChart("mix");
   const productCompChart = getChart("comparison") || getChart("compare");
+  const targetAttainmentChart =
+    getChart("target-attainment") ||
+    getChart("target") ||
+    getChart("attainment");
   const heatmapChart = getChart("heatmap") || getChart("heat");
   const areaChart = getChart("area");
   const territoryChart = getChart("territory") || getChart("ranking");
@@ -333,6 +384,11 @@ export function buildDashboardEmail(data: {
         <td class="header-meta-cell" style="text-align:right">
           <div class="header-title" style="color:white;font-size:22px;font-weight:700">Sales Report</div>
           <div style="color:rgba(255,255,255,0.85);font-size:13px">${date}</div>
+          <div style="margin-top:6px">
+            <span style="display:inline-block;background:rgba(255,255,255,0.2);color:white;font-size:11px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;padding:3px 10px;border-radius:999px">
+              D-1 · Yesterday's Sales
+            </span>
+          </div>
           ${
             dashboardUrl
               ? `<div style="margin-top:10px">
@@ -346,6 +402,11 @@ export function buildDashboardEmail(data: {
   </div>
 
   <div class="email-container" style="max-width:900px;margin:0 auto;padding:24px 16px">
+
+    <!-- ═══ D-1 NOTICE ═══ -->
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;margin-bottom:20px;font-size:12px;color:#1e3a8a">
+      📅 This report reflects <strong>yesterday's (D-1) actual sales</strong> for <strong>${date}</strong>.
+    </div>
 
     <!-- ═══ 1. KPI CARDS ═══ -->
     <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px">
@@ -450,6 +511,35 @@ export function buildDashboardEmail(data: {
       </table>
     </div>
 
+    ${
+      mtdTarget
+        ? `
+    <!-- ═══ 2b. MTD TARGET ACHIEVEMENT ═══ -->
+    <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
+      <div class="section-title" style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:4px">🎯 MTD Target Achievement</div>
+      <div style="font-size:12px;color:#64748b;margin-bottom:12px">
+        Overall: <strong style="color:#1e293b">${formatNum(mtdTarget.total_mtd_sales)}</strong> of
+        <strong style="color:#1e293b">${formatNum(mtdTarget.total_target)}</strong> target
+        (<strong style="color:${Number(mtdTarget.overall_achievement_pct) >= 100 ? "#16a34a" : Number(mtdTarget.overall_achievement_pct) >= 75 ? "#f59e0b" : "#dc2626"}">${Number(mtdTarget.overall_achievement_pct).toFixed(1)}%</strong>)
+      </div>
+      <div class="chart-scroll" style="border:none">
+        <table cellpadding="0" cellspacing="0" style="width:100%;min-width:420px">
+          <thead>
+            <tr style="background:linear-gradient(to right,#94C12E,#10BBE1,#1D4370)">
+              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:left;white-space:nowrap">Product</th>
+              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">MTD Sales</th>
+              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">Target</th>
+              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">Achievement</th>
+            </tr>
+          </thead>
+          <tbody>${mtdTargetRows}</tbody>
+        </table>
+      </div>
+    </div>
+    `
+        : ""
+    }
+
     <!-- ═══ 3. REGION PERFORMANCE TABLE ═══ -->
     <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:16px">
       <div class="section-title" style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:4px">📊 Region Performance</div>
@@ -461,8 +551,8 @@ export function buildDashboardEmail(data: {
               <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:left;white-space:nowrap">Region</th>
               <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">Supercrete</th>
               <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">Supercrete+</th>
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">POW</th>
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">Holcim SS</th>
+              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">Powercreate</th>
+              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">HOLCIM</th>
               <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">HWP</th>
               <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">HCG</th>
               <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">Total</th>
@@ -499,6 +589,9 @@ export function buildDashboardEmail(data: {
     <!-- ═══ 7. PRODUCT COMPARISON CHART ═══ -->
     ${renderChart(productCompChart, { label: "Product Comparison" })}
 
+    <!-- ═══ 7b. TARGET ATTAINMENT CHART ═══ -->
+    ${renderChart(targetAttainmentChart, { label: "Target Attainment", emoji: "🎯" })}
+
     <!-- ═══ 8. HEATMAP (only one scrollbar, modest zoom) ═══ -->
     ${renderChart(heatmapChart, {
       label: "Territory Heatmap",
@@ -507,21 +600,39 @@ export function buildDashboardEmail(data: {
       hint: "👆 Swipe / pinch to explore the full heatmap",
     })}
 
-    <!-- ═══ 9. AREA PERFORMANCE TABLE ═══ -->
+    <!-- ═══ 9. AREA PERFORMANCE TABLE (all areas) ═══ -->
     <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:16px">
-      <div class="section-title" style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:4px">📍 Area Performance</div>
+      <div class="section-title" style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:4px">📍 Area Performance — All Areas</div>
       <div style="font-size:11px;color:#94a3b8;margin-bottom:12px">Swipe left to see all columns →</div>
       <div class="chart-scroll" style="border:none">
         <table cellpadding="0" cellspacing="0" style="width:100%;min-width:420px">
           <thead>
             <tr style="background:linear-gradient(to right,#94C12E,#10BBE1,#1D4370)">
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:left;white-space:nowrap">Territory</th>
+              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:left;white-space:nowrap">Area</th>
               <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:left;white-space:nowrap">Region</th>
               <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:center;white-space:nowrap">Customers</th>
               <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">Total Sales</th>
             </tr>
           </thead>
           <tbody>${areaRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══ 9b. TOP 5 AREAS (written table, not just the chart) ═══ -->
+    <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:16px">
+      <div class="section-title" style="font-size:15px;font-weight:700;color:#16a34a;margin-bottom:16px">🏆 Top 5 Areas</div>
+      <div class="chart-scroll" style="border:none">
+        <table cellpadding="0" cellspacing="0" style="width:100%;min-width:380px">
+          <thead>
+            <tr style="background:#f0fdf4">
+              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#16a34a;text-align:left;border-bottom:1px solid #bbf7d0;white-space:nowrap">Area</th>
+              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#16a34a;text-align:left;border-bottom:1px solid #bbf7d0;white-space:nowrap">Region</th>
+              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#16a34a;text-align:center;border-bottom:1px solid #bbf7d0;white-space:nowrap">Customers</th>
+              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#16a34a;text-align:right;border-bottom:1px solid #bbf7d0;white-space:nowrap">Total Sales</th>
+            </tr>
+          </thead>
+          <tbody>${top5AreaRows}</tbody>
         </table>
       </div>
     </div>

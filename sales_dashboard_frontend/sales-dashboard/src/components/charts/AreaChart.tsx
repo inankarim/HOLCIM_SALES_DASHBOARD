@@ -9,7 +9,7 @@ import {
   Tooltip,
   CartesianGrid,
   Legend,
-  LabelList
+  LabelList,
 } from "recharts";
 import { formatNumber } from "../../lib/formatNumber";
 import { ImageDown } from "lucide-react";
@@ -60,46 +60,14 @@ export function AreaChart({ filters }: Props) {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // ✅ ref goes directly on the element wrapping the BarChart SVG — NOT the scroll container
   const chartRef = useRef<HTMLDivElement>(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-
-
-  const TotalLabel = (props: any) => {
-  const { x, y, width, height, value } = props;
-
-  return (
-    <text
-      x={x + width + 8}
-      y={y + height / 2}
-      fill="#111827"
-      fontSize={isMobile ? 9 : 11}
-      fontWeight={700}
-      dominantBaseline="middle"
-    >
-      {formatNumber(value)}
-    </text>
-  );
-};
-
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
-
-  const activeProducts = filters.product
-    ? [PRODUCT_KEY_MAP[filters.product]].filter(Boolean)
-    : PRODUCTS;
-
-    const chartData = data.map((item) => ({
-  ...item,
-  total: activeProducts.reduce(
-    (sum, key) => sum + (Number(item[key]) || 0),
-    0,
-  ),
-  }));
 
   useEffect(() => {
     setLoading(true);
@@ -111,12 +79,19 @@ export function AreaChart({ filters }: Props) {
       .finally(() => setLoading(false));
   }, [filters]);
 
-  const chartHeight = Math.max(300, data.length * 35);
-  const chartWidth = isMobile ? 400 : 1200;
+  const activeProducts = filters.product
+    ? [PRODUCT_KEY_MAP[filters.product]].filter(Boolean)
+    : PRODUCTS;
+
+  const chartData = [...data]
+    .map((item) => ({
+      ...item,
+      total: activeProducts.reduce((sum, key) => sum + (Number(item[key]) || 0), 0),
+    }))
+    .sort((a, b) => b.total - a.total);
 
   const handleExport = () => {
     if (!chartRef.current) return;
-    // ✅ Temporarily remove overflow so html-to-image captures full content
     const el = chartRef.current;
     const prev = el.style.overflow;
     el.style.overflow = "visible";
@@ -124,6 +99,12 @@ export function AreaChart({ filters }: Props) {
       el.style.overflow = prev;
     });
   };
+
+  const barWidth = isMobile ? 52 : 68;
+  const chartWidth = Math.max(chartData.length * barWidth + 80, 480);
+  // Extra top margin so tallest bar's label is never clipped
+  const topMargin = 48;
+  const chartHeight = isMobile ? 300 + topMargin : 360 + topMargin;
 
   return (
     <Card>
@@ -135,7 +116,6 @@ export function AreaChart({ filters }: Props) {
               Stacked product volume by area
             </p>
           </div>
-          {/* ✅ ignore-export keeps the button OUT of the captured image */}
           <button
             onClick={handleExport}
             className="ignore-export flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -152,94 +132,110 @@ export function AreaChart({ filters }: Props) {
             {error}
           </div>
         ) : (
-          // ✅ overflow-x-auto stays on an OUTER wrapper, NOT on the ref element
           <div className="overflow-x-auto">
-            {/* ✅ ref is placed here — directly on the element containing the SVG */}
-            <div ref={chartRef} style={{ background: "#ffffff", display: "inline-block" }}>
-    <BarChart
-      width={chartWidth}
-      height={chartHeight}
-      data={chartData}
-      layout="vertical"
-      margin={{
-        left: isMobile ? 55 : 100,
-        right: isMobile ? 70 : 90, // Extra room for total labels
-        top: 5,
-        bottom: 5,
-      }}
-    >
-      <CartesianGrid
-        strokeDasharray="3 3"
-        stroke="var(--border)"
-      />
+            <div ref={chartRef} style={{ minWidth: chartWidth, background: "#ffffff" }}>
+              <BarChart
+                width={chartWidth}
+                height={chartHeight}
+                data={chartData}
+                margin={{
+                  top: topMargin,
+                  right: 16,
+                  left: 8,
+                  bottom: isMobile ? 72 : 88,
+                }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
 
-      <XAxis
-        type="number"
-        tickFormatter={formatNumber}
-        fontSize={isMobile ? 8 : 10}
-        stroke="var(--muted-foreground)"
-      />
+                <XAxis
+                  dataKey="area"
+                  fontSize={isMobile ? 8 : 10}
+                  stroke="var(--muted-foreground)"
+                  interval={0}
+                  angle={-40}
+                  textAnchor="end"
+                  height={isMobile ? 72 : 88}
+                  tick={{ fill: "var(--muted-foreground)" }}
+                />
 
-      <YAxis
-        type="category"
-        dataKey="area"
-        fontSize={isMobile ? 7 : 10}
-        width={isMobile ? 55 : 100}
-        stroke="var(--muted-foreground)"
-        tickFormatter={(value) =>
-          isMobile && value.length > 9
-            ? value.slice(0, 9) + "…"
-            : value
-        }
-      />
+                <YAxis
+                  tickFormatter={formatNumber}
+                  fontSize={9}
+                  stroke="var(--muted-foreground)"
+                  width={56}
+                  tick={{ fill: "var(--muted-foreground)" }}
+                />
 
-      <Tooltip
-        formatter={(value: any) => formatNumber(Number(value))}
-      />
+                {/* Custom content instead of `formatter` — for a stacked bar,
+                   the payload includes every series at that x position, so
+                   we can list all active products' values in one tooltip
+                   instead of just the single segment under the cursor. */}
+                <Tooltip
+                  cursor={{ fill: "var(--muted)", opacity: 0.4 }}
+                  content={({ active, payload, label }: any) =>
+                    active && payload?.length ? (
+                      <div className="rounded-lg border bg-popover px-3 py-2 text-xs shadow-lg">
+                        <div className="font-semibold mb-1">{label}</div>
+                        {payload
+                          .filter((p: any) => p.dataKey !== "total")
+                          .map((p: any) => (
+                            <div
+                              key={p.dataKey}
+                              className="flex items-center justify-between gap-4"
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <span
+                                  className="inline-block h-2 w-2 rounded-sm"
+                                  style={{ backgroundColor: p.fill }}
+                                />
+                                {PRODUCT_LABELS[p.dataKey] || p.dataKey}
+                              </span>
+                              <span className="font-medium">
+                                {formatNumber(Number(p.value))}
+                              </span>
+                            </div>
+                          ))}
+                      </div>
+                    ) : null
+                  }
+                />
 
-      <Legend
-        formatter={(value) => (
-          <span className={isMobile ? "text-[9px]" : "text-xs"}>
-            {PRODUCT_LABELS[value] || value}
-          </span>
-        )}
-      />
+                <Legend
+                  wrapperStyle={{ paddingTop: 12 }}
+                  formatter={(value) => (
+                    <span style={{ fontSize: isMobile ? 9 : 11 }}>
+                      {PRODUCT_LABELS[value] || value}
+                    </span>
+                  )}
+                />
 
-      {/* Stacked product bars */}
-      {activeProducts.map((product, index) => (
-        <Bar
-          key={product}
-          dataKey={product}
-          stackId="a"
-          fill={COLORS[product]}
-        >
-          {index === activeProducts.length - 1 && (
-            <LabelList
-              dataKey="total"
-              content={<TotalLabel />}
-            />
-          )}
-        </Bar>
-      ))}
-
-      {/* Invisible bar used only to display total labels */}
-      <Bar
-        dataKey="total"
-        fill="transparent"
-        stackId="none"
-      >
-        <LabelList
-          dataKey="total"
-          position="right"
-          formatter={(value: any) => formatNumber(Number(value))}
-          style={{
-            fill: "#111827",
-            fontSize: isMobile ? 9 : 11,
-            fontWeight: 700,
-          }}
-        />
-      </Bar>
-    </BarChart>
+                {activeProducts.map((product, index) => {
+                  const isTop = index === activeProducts.length - 1;
+                  return (
+                    <Bar
+                      key={product}
+                      dataKey={product}
+                      stackId="a"
+                      fill={COLORS[product]}
+                      radius={isTop ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                      maxBarSize={56}
+                    >
+                      {isTop && (
+                        <LabelList
+                          dataKey="total"
+                          position="top"
+                          formatter={(v: any) => formatNumber(Number(v))}
+                          style={{
+                            fontSize: isMobile ? 8 : 10,
+                            fontWeight: 700,
+                            fill: "#111827",
+                          }}
+                        />
+                      )}
+                    </Bar>
+                  );
+                })}
+              </BarChart>
             </div>
           </div>
         )}
