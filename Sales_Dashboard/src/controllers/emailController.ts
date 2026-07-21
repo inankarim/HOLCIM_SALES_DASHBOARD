@@ -39,14 +39,19 @@ export const sendDashboardEmail = async (
     // Fetch all data for this date
     //
     // NOTE: `sales_current` does NOT have columns named plc / plc_plus / pow /
-    // holcim_ss / hwp / hcg. The real MTD columns (see salesController.ts) are:
-    //   plc_mtd_sales, plc_plus_mtd_sales, powercrete_mtd_sales,
-    //   pcc_opc_mtd_sales, hwp_mtd_sales, hcg_mtd_sales
-    // and each has a matching *_target column (plc_target, plc_plus_target,
-    // powercrete_target, pcc_opc_target, hwp_target, hcg_target).
-    // Every query below was rewritten to use those real column names — this
-    // was the reason "Send Report" was failing (Postgres was throwing
-    // "column ... does not exist" on every one of these queries).
+    // holcim_ss / hwp / hcg — the real columns are plc_yesterday / plc_mtd_sales
+    // etc. (see salesController.ts).
+    //
+    // Two different metrics live on this table and must not be mixed up:
+    //   - *_yesterday: the day's actual sales delta. Every "sales figure"
+    //     query below (KPI, by-region, by-product, insights, deep-insights,
+    //     by-area) sums THIS column — summing *_mtd_sales instead double-counts,
+    //     since it's a cumulative-as-of-upload snapshot, not a daily figure.
+    //     The result is still aliased as `${key}_mtd_sales` so downstream
+    //     field names / the email template stay unchanged.
+    //   - *_mtd_sales / *_target: the true cumulative MTD-vs-target snapshot.
+    //     Only the "MTD vs Target by product" query below is meant to read
+    //     these columns directly.
     const [
       kpiResult,
       regionResult,
@@ -57,27 +62,40 @@ export const sendDashboardEmail = async (
       areaResult,
     ] = await Promise.all([
       // KPI
+      // Actual sales for the date — sum the *_yesterday deltas (never the
+      // *_mtd_sales cumulative snapshot), collapsed to one row per customer
+      // first so avg_per_customer is a true per-customer average.
       pool.query(
         `
+        WITH per_customer AS (
+          SELECT sap_id, customer_name, territory,
+            SUM(plc_yesterday) AS plc_mtd_sales, SUM(plc_plus_yesterday) AS plc_plus_mtd_sales,
+            SUM(powercrete_yesterday) AS powercrete_mtd_sales, SUM(pcc_opc_yesterday) AS pcc_opc_mtd_sales,
+            SUM(hwp_yesterday) AS hwp_mtd_sales, SUM(hcg_yesterday) AS hcg_mtd_sales
+          FROM sales_current
+          WHERE upload_date = $1
+          GROUP BY sap_id, customer_name, territory
+        )
         SELECT
-          SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total_sales,
+          COALESCE(SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales), 0) AS total_sales,
           COUNT(DISTINCT customer_name) AS total_customers,
           COUNT(DISTINCT territory) AS total_territories,
-          AVG(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS avg_per_customer
-        FROM sales_current
-        WHERE upload_date = $1
+          COALESCE(AVG(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales), 0) AS avg_per_customer
+        FROM per_customer
       `,
         [date],
       ),
 
       // By Region
+      // Actual sales per region — sum *_yesterday, aliased as *_mtd_sales so
+      // downstream field names / template mapping stay unchanged.
       pool.query(
         `
         SELECT region,
-          SUM(plc_mtd_sales) AS plc_mtd_sales, SUM(plc_plus_mtd_sales) AS plc_plus_mtd_sales,
-          SUM(powercrete_mtd_sales) AS powercrete_mtd_sales, SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
-          SUM(hwp_mtd_sales) AS hwp_mtd_sales, SUM(hcg_mtd_sales) AS hcg_mtd_sales,
-          SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+          SUM(plc_yesterday) AS plc_mtd_sales, SUM(plc_plus_yesterday) AS plc_plus_mtd_sales,
+          SUM(powercrete_yesterday) AS powercrete_mtd_sales, SUM(pcc_opc_yesterday) AS pcc_opc_mtd_sales,
+          SUM(hwp_yesterday) AS hwp_mtd_sales, SUM(hcg_yesterday) AS hcg_mtd_sales,
+          SUM(plc_yesterday + plc_plus_yesterday + powercrete_yesterday + pcc_opc_yesterday + hwp_yesterday + hcg_yesterday) AS total
         FROM sales_current
         WHERE upload_date = $1
         GROUP BY region
@@ -90,9 +108,9 @@ export const sendDashboardEmail = async (
       pool.query(
         `
         SELECT
-          SUM(plc_mtd_sales) AS plc_mtd_sales, SUM(plc_plus_mtd_sales) AS plc_plus_mtd_sales,
-          SUM(powercrete_mtd_sales) AS powercrete_mtd_sales, SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
-          SUM(hwp_mtd_sales) AS hwp_mtd_sales, SUM(hcg_mtd_sales) AS hcg_mtd_sales
+          SUM(plc_yesterday) AS plc_mtd_sales, SUM(plc_plus_yesterday) AS plc_plus_mtd_sales,
+          SUM(powercrete_yesterday) AS powercrete_mtd_sales, SUM(pcc_opc_yesterday) AS pcc_opc_mtd_sales,
+          SUM(hwp_yesterday) AS hwp_mtd_sales, SUM(hcg_yesterday) AS hcg_mtd_sales
         FROM sales_current
         WHERE upload_date = $1
       `,
@@ -100,55 +118,58 @@ export const sendDashboardEmail = async (
       ),
 
       // Insights
+      // Always the true daily sales total — sum *_yesterday, never
+      // *_mtd_sales (that's a cumulative snapshot, not a per-day figure).
       pool.query(
         `
         SELECT
           (SELECT region FROM sales_current WHERE upload_date = $1
-            GROUP BY region ORDER BY SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) DESC LIMIT 1) AS best_region,
-          (SELECT SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) FROM sales_current WHERE upload_date = $1
-            GROUP BY region ORDER BY SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) DESC LIMIT 1) AS best_region_value,
+            GROUP BY region ORDER BY SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) DESC LIMIT 1) AS best_region,
+          (SELECT SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) FROM sales_current WHERE upload_date = $1
+            GROUP BY region ORDER BY SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) DESC LIMIT 1) AS best_region_value,
           (SELECT region FROM sales_current WHERE upload_date = $1
-            GROUP BY region ORDER BY SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) ASC LIMIT 1) AS worst_region,
-          (SELECT SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) FROM sales_current WHERE upload_date = $1
-            GROUP BY region ORDER BY SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) ASC LIMIT 1) AS worst_region_value,
+            GROUP BY region ORDER BY SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) ASC LIMIT 1) AS worst_region,
+          (SELECT SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) FROM sales_current WHERE upload_date = $1
+            GROUP BY region ORDER BY SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) ASC LIMIT 1) AS worst_region_value,
           (SELECT territory FROM sales_current WHERE upload_date = $1
-            GROUP BY territory ORDER BY SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) ASC LIMIT 1) AS weakest_territory,
-          (SELECT SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) FROM sales_current WHERE upload_date = $1
-            GROUP BY territory ORDER BY SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) ASC LIMIT 1) AS weakest_territory_value,
+            GROUP BY territory ORDER BY SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) ASC LIMIT 1) AS weakest_territory,
+          (SELECT SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) FROM sales_current WHERE upload_date = $1
+            GROUP BY territory ORDER BY SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) ASC LIMIT 1) AS weakest_territory_value,
           (SELECT customer_name FROM sales_current WHERE upload_date = $1
-            GROUP BY customer_name ORDER BY SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) DESC LIMIT 1) AS top_customer,
-          (SELECT SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) FROM sales_current WHERE upload_date = $1
-            GROUP BY customer_name ORDER BY SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) DESC LIMIT 1) AS top_customer_value,
+            GROUP BY customer_name ORDER BY SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) DESC LIMIT 1) AS top_customer,
+          (SELECT SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) FROM sales_current WHERE upload_date = $1
+            GROUP BY customer_name ORDER BY SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) DESC LIMIT 1) AS top_customer_value,
           (SELECT customer_name FROM sales_current WHERE upload_date = $1
-            GROUP BY customer_name ORDER BY SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) ASC LIMIT 1) AS lowest_customer,
-          (SELECT SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) FROM sales_current WHERE upload_date = $1
-            GROUP BY customer_name ORDER BY SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) ASC LIMIT 1) AS lowest_customer_value
+            GROUP BY customer_name ORDER BY SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) ASC LIMIT 1) AS lowest_customer,
+          (SELECT SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) FROM sales_current WHERE upload_date = $1
+            GROUP BY customer_name ORDER BY SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) ASC LIMIT 1) AS lowest_customer_value
       `,
         [date],
       ),
 
       // Deep Insights
+      // Same rule as Insights above — *_yesterday, never *_mtd_sales.
       pool.query(
         `
         WITH totals AS (
-          SELECT SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) AS grand_total FROM sales_current WHERE upload_date = $1
+          SELECT SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) AS grand_total FROM sales_current WHERE upload_date = $1
         ),
         ranked_customers AS (
-          SELECT customer_name, SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) AS total
+          SELECT customer_name, SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) AS total
           FROM sales_current WHERE upload_date = $1
           GROUP BY customer_name ORDER BY total DESC
         )
         SELECT
           (SELECT JSON_AGG(r) FROM (
             SELECT tsm_tse, COUNT(DISTINCT customer_name) AS customers,
-              SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) AS total
+              SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) AS total
             FROM sales_current WHERE upload_date = $1
             AND tsm_tse NOT ILIKE '%vacant%' AND tsm_tse != ''
             GROUP BY tsm_tse ORDER BY total ASC LIMIT 5
           ) r) AS bottom5_tsm,
           (SELECT JSON_AGG(r) FROM (
             SELECT asm_kam, COUNT(DISTINCT customer_name) AS customers,
-              SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) AS total
+              SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) AS total
             FROM sales_current WHERE upload_date = $1
             AND asm_kam != ''
             GROUP BY asm_kam ORDER BY total ASC LIMIT 5
@@ -156,13 +177,13 @@ export const sendDashboardEmail = async (
           (SELECT JSON_AGG(r) FROM (
             SELECT territory, region, area,
               COUNT(DISTINCT customer_name) AS customers,
-              SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) AS total
+              SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) AS total
             FROM sales_current WHERE upload_date = $1
             GROUP BY territory, region, area ORDER BY total ASC LIMIT 5
           ) r) AS bottom5_territories,
           (SELECT JSON_AGG(r) FROM (
             SELECT customer_name, region, area, territory, tsm_tse,
-              SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) AS total
+              SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) AS total
             FROM sales_current WHERE upload_date = $1
             GROUP BY customer_name, region, area, territory, tsm_tse
             ORDER BY total DESC LIMIT 5
@@ -208,7 +229,7 @@ export const sendDashboardEmail = async (
         `
         SELECT area, region,
           COUNT(DISTINCT customer_name) AS customers,
-          SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+          SUM(plc_yesterday + plc_plus_yesterday + powercrete_yesterday + pcc_opc_yesterday + hwp_yesterday + hcg_yesterday) AS total
         FROM sales_current
         WHERE upload_date = $1
         GROUP BY area, region
@@ -225,10 +246,10 @@ export const sendDashboardEmail = async (
     // Process products
     const pRow = productResult.rows[0];
     const products = [
-      { name: "PLC", value: Number(pRow.plc_mtd_sales) },
-      { name: "PLC+", value: Number(pRow.plc_plus_mtd_sales) },
+      { name: "SuperCreate", value: Number(pRow.plc_mtd_sales) },
+      { name: "SuperCreate Plus+", value: Number(pRow.plc_plus_mtd_sales) },
       { name: "Powercrete", value: Number(pRow.powercrete_mtd_sales) },
-      { name: "PCC + OPC", value: Number(pRow.pcc_opc_mtd_sales) },
+      { name: "Holcim", value: Number(pRow.pcc_opc_mtd_sales) },
       { name: "HWP", value: Number(pRow.hwp_mtd_sales) },
       { name: "HCG", value: Number(pRow.hcg_mtd_sales) },
     ]
@@ -320,12 +341,12 @@ export const sendDashboardEmail = async (
     const mtdRow = mtdTargetResult.rows[0];
     const mtdProducts = [
       {
-        name: "PLC",
+        name: "Supercreate",
         mtd_sales: Number(mtdRow.plc_mtd_sales),
         target: Number(mtdRow.plc_target),
       },
       {
-        name: "PLC+",
+        name: "Supercreate+",
         mtd_sales: Number(mtdRow.plc_plus_mtd_sales),
         target: Number(mtdRow.plc_plus_target),
       },
@@ -335,7 +356,7 @@ export const sendDashboardEmail = async (
         target: Number(mtdRow.powercrete_target),
       },
       {
-        name: "PCC + OPC",
+        name: "Holcim",
         mtd_sales: Number(mtdRow.pcc_opc_mtd_sales),
         target: Number(mtdRow.pcc_opc_target),
       },

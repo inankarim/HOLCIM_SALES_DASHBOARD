@@ -16,9 +16,9 @@ const PRODUCTS = [
   "hcg_mtd_sales",
 ];
 const PRODUCT_LABELS: Record<string, string> = {
-  plc_mtd_sales: "PLC",
-  plc_plus_mtd_sales: "PLC+",
-  powercrete_mtd_sales: "POW",
+  plc_mtd_sales: "Supercreate",
+  plc_plus_mtd_sales: "Supercreate+",
+  powercrete_mtd_sales: "Powercreate",
   pcc_opc_mtd_sales: "HOLCIM",
   hwp_mtd_sales: "HWP",
   hcg_mtd_sales: "HCG",
