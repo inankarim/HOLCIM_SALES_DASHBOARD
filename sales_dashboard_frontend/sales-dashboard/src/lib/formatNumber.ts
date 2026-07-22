@@ -8,6 +8,6 @@ export function formatNumber(value: number): string {
   } else if (abs >= 1000) {
     return (value / 1000).toFixed(2) + "K MT"
   } else {
-    return value.toLocaleString() + " MT"
+    return Math.round(value).toLocaleString() + " MT"
   }
 }

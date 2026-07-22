@@ -159,10 +159,11 @@ export function TargetAttainmentChart({ filters }: Props) {
             </div>
 
             {/* Grouped bars: MTD sales vs Target, thin bars, tight spacing */}
+            {/* Extra top margin makes room for the value + % labels stacked above/inside each bar */}
             <ResponsiveContainer width="100%" height={isMobile ? 280 : 320}>
               <BarChart
                 data={sorted}
-                margin={{ top: 20, right: 10, left: 0, bottom: 5 }}
+                margin={{ top: 32, right: 10, left: 0, bottom: 5 }}
                 barGap={3}
                 barCategoryGap="28%"
               >
@@ -202,18 +203,34 @@ export function TargetAttainmentChart({ filters }: Props) {
                 />
 
                 {/* Target — thin grey reference bar */}
-                <Bar dataKey="target" fill="#cbd5e1" radius={[3, 3, 0, 0]} maxBarSize={16} />
+                <Bar dataKey="target" fill="#cbd5e1" radius={[3, 3, 0, 0]} maxBarSize={16}>
+                  {/* Target value shown above the bar; hidden on mobile where space is tight */}
+                  <LabelList
+                    dataKey="target"
+                    position="top"
+                    formatter={(v: any) => (isMobile ? "" : formatNumber(v))}
+                    style={{ fontSize: 9, fill: "#64748b" }}
+                  />
+                </Bar>
 
                 {/* MTD sales — colored by achievement, can visibly clear the target bar */}
                 <Bar dataKey="mtd" radius={[3, 3, 0, 0]} maxBarSize={16}>
                   {sorted.map((row) => (
                     <Cell key={row.key} fill={statusColor(row.ach).bar} />
                   ))}
+                  {/* Actual MTD value, always visible (not just on hover) so it shows up in PNG exports too */}
+                  <LabelList
+                    dataKey="mtd"
+                    position="top"
+                    formatter={(v: any) => formatNumber(v)}
+                    style={{ fontSize: isMobile ? 8 : 10, fontWeight: 600, fill: "#111827" }}
+                  />
+                  {/* Achievement % sits inside the bar near the top so it doesn't collide with the value label above */}
                   <LabelList
                     dataKey="ach"
-                    position="top"
+                    position="insideTop"
                     formatter={(v: any) => `${Number(v).toFixed(0)}%`}
-                    style={{ fontSize: 10, fontWeight: 600, fill: "#111827" }}
+                    style={{ fontSize: isMobile ? 8 : 9, fontWeight: 700, fill: "#ffffff" }}
                   />
                 </Bar>
               </BarChart>

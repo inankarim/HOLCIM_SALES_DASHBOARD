@@ -13,7 +13,9 @@ import { InsightsPanel } from "../components/shared/InsightsPanel";
 import { DeepInsightsPage } from "./DeepInsightsPage";
 import { EmailChartModal } from "../components/shared/EmailChartModal";
 import { Button } from "../components/ui/button";
+import { CustomerTypeSalesChart } from "../components/charts/ Customertypesaleschart"; // adjust path to match actual location
 import { ArrowLeft, BarChart2, Layers, ImageDown } from "lucide-react";
+
 import type { FilterParams } from "../api/salesApi";
 
 interface Props {
@@ -129,10 +131,14 @@ export function AdminReportPage({ uploadDate, onBack, onEmailSent }: Props) {
           <div id="chart-treemap" className="overflow-x-auto">
             <TreemapChart filters={filters} />
           </div>
+          <div id="chart-customer-type" className="overflow-x-auto">
+            <CustomerTypeSalesChart filters={filters} />
+          </div>
 
           <div id="chart-customer" className="overflow-x-auto">
             <CustomerChart filters={filters} />
           </div>
+
         </div>
       )}
 

@@ -23,11 +23,18 @@ export function buildDashboardEmail(data: {
     dashboardUrl,
   } = data;
 
-  const formatNum = (val: number): string => {
-    if (!val) return "0";
-    if (val >= 1000000) return (val / 1000000).toFixed(2) + "M MT";
-    if (val >= 1000) return (val / 1000).toFixed(2) + "K MT";
-    return val.toLocaleString() + " MT";
+  const formatNum = (value: number): string => {
+    if (value === null || value === undefined || isNaN(value)) return "0";
+
+    const abs = Math.abs(value);
+
+    if (abs >= 1000000) {
+      return (value / 1000000).toFixed(2) + "M MT";
+    } else if (abs >= 1000) {
+      return (value / 1000).toFixed(2) + "K MT";
+    } else {
+      return Math.round(value).toLocaleString() + " MT";
+    }
   };
 
   // Helper: find chart by name keyword
@@ -218,6 +225,8 @@ export function buildDashboardEmail(data: {
   const heatmapChart = getChart("heatmap") || getChart("heat");
   const areaChart = getChart("area");
   const territoryChart = getChart("territory") || getChart("ranking");
+  const customerTypeChart =
+    getChart("customer-type") || getChart("customer type");
 
   return `
 <!DOCTYPE html>
@@ -429,6 +438,7 @@ export function buildDashboardEmail(data: {
             <div class="kpi-value" style="font-size:24px;font-weight:700;color:#f59e0b;margin-top:4px">${kpi?.total_territories}</div>
           </div>
         </td>
+
         <td class="kpi-cell" width="25%" style="padding:4px">
           <div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0;border-left:4px solid #8b5cf6">
             <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">Avg / Customer</div>
@@ -651,6 +661,11 @@ export function buildDashboardEmail(data: {
       emoji: "🏅",
       wide: true,
       hint: "👆 Swipe / pinch to see all territories",
+    })}
+    <!-- ═══ 11b. CUSTOMER TYPE SALES CHART ═══ -->
+    ${renderChart(customerTypeChart, {
+      label: "Customer Type Sales",
+      emoji: "👥",
     })}
 
     <!-- ═══ 12. DEEP INSIGHTS — BOTTOM PERFORMERS ═══ -->

@@ -667,6 +667,67 @@ export const getByArea = async (
   }
 };
 
+// ─── GET /api/sales/by-customer-type ──────────────────────────────────────────
+export const getByCustomerType = async (
+  req: AuthRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { clause, params, defaultDate } = await resolveDateFilter(req.query);
+    const { extra, params: allParams } = buildFilters(req.query, params);
+
+    const result = await pool.query(
+      `WITH per_customer AS (
+        SELECT sap_id, customer_type,
+          ${perCustomerProductCols()}
+        FROM sales_current
+        ${clause}${extra}
+        GROUP BY sap_id, customer_type
+      )
+      SELECT
+        customer_type,
+        SUM(plc_mtd_sales)       AS plc_mtd_sales,
+        SUM(plc_plus_mtd_sales)  AS plc_plus_mtd_sales,
+        SUM(powercrete_mtd_sales)       AS powercrete_mtd_sales,
+        SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
+        SUM(hwp_mtd_sales)       AS hwp_mtd_sales,
+        SUM(hcg_mtd_sales)       AS hcg_mtd_sales,
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
+       FROM per_customer
+       WHERE customer_type IS NOT NULL AND customer_type != ''
+       GROUP BY customer_type
+       HAVING SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) > 0
+       ORDER BY total DESC`,
+      allParams,
+    );
+
+    const grandTotal = result.rows.reduce((s, r) => s + Number(r.total), 0);
+
+    res.json({
+      date_used: defaultDate,
+      grand_total: grandTotal,
+      // data.total gives chart #1 (total sales by customer type); the
+      // per-product fields on the same rows give chart #2 (product mix by
+      // customer type) — one endpoint serves both charts. Customer types
+      // with a total of 0 are excluded via the HAVING clause above.
+      data: result.rows.map((r) => ({
+        customer_type: r.customer_type,
+        plc_mtd_sales: Number(r.plc_mtd_sales),
+        plc_plus_mtd_sales: Number(r.plc_plus_mtd_sales),
+        powercrete_mtd_sales: Number(r.powercrete_mtd_sales),
+        pcc_opc_mtd_sales: Number(r.pcc_opc_mtd_sales),
+        hwp_mtd_sales: Number(r.hwp_mtd_sales),
+        hcg_mtd_sales: Number(r.hcg_mtd_sales),
+        total: Number(r.total),
+        pct: grandTotal
+          ? Number(((Number(r.total) / grandTotal) * 100).toFixed(2))
+          : 0,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch customer type data" });
+  }
+};
 // ─── GET /api/sales/by-territory ──────────────────────────────────────────────
 export const getByTerritory = async (
   req: AuthRequest,
@@ -775,7 +836,14 @@ export const getCustomers = async (
       total_customers: customers.length,
       grand_total: grandTotal,
       top5: customers.slice(0, 5),
-      bottom5: customers.slice(-5).reverse(),
+      // Exclude customers with 0 total sales from the bottom 5 — a
+      // zero-sale customer isn't a "weak performer" for this list, it's a
+      // non-buyer, and mixing them in crowds out customers who genuinely
+      // sold a small (non-zero) amount.
+      bottom5: customers
+        .filter((c) => c.total !== 0)
+        .slice(-5)
+        .reverse(),
       data: customers,
     });
   } catch (err) {
@@ -981,11 +1049,15 @@ export const getDeepInsights = async (
     );
 
     // ── 4. Bottom 5 customers ─────────────────────────────────────────────────
+    // Excludes customers with exactly 0 total sales — a non-buyer isn't a
+    // "weak performer" for this list; we only want customers who sold a
+    // genuinely small (but non-zero) amount.
     const bottomCustomers = await pool.query(
       `SELECT customer_name, region, area, territory, tsm_tse, asm_kam,
         SUM(${totalExpr}) AS total
        FROM sales_current ${clause}${extra}
        GROUP BY customer_name, region, area, territory, tsm_tse, asm_kam
+       HAVING SUM(${totalExpr}) != 0
        ORDER BY total ASC
        LIMIT 5`,
       allParams,
@@ -1843,7 +1915,12 @@ export const getYesterdayCustomers = async (
       total_customers: customers.length,
       grand_total_yesterday: grandTotal,
       top5: customers.slice(0, 5),
-      bottom5: customers.slice(-5).reverse(),
+      // Exclude customers with 0 total_yesterday from the bottom 5 — see
+      // the same note in getCustomers above.
+      bottom5: customers
+        .filter((c) => c.total_yesterday !== 0)
+        .slice(-5)
+        .reverse(),
       data: customers,
     });
   } catch (err) {

@@ -20,6 +20,16 @@ interface Props {
   filters: FilterParams;
 }
 
+// getKpi's top_product/lowest_product.name come from the same short-code
+// map as getByProduct (PLC, PLC+, PCC + OPC, ...). Only these three get
+// relabeled; anything not listed here (Powercrete, HWP, HCG) falls through
+// to its original short code via the `|| value` fallback.
+const PRODUCT_LABELS: Record<string, string> = {
+  "PLC": "Supercrete",
+  "PLC+": "Supercrete +",
+  "PCC + OPC": "Holcim",
+};
+
 export function KpiRow({ filters }: Props) {
   const [data, setData] = useState<KpiData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -93,14 +103,23 @@ export function KpiRow({ filters }: Props) {
       />
       <KpiCard
         label="Top Product"
-        value={data ? data.top_product.name : "—"}
+        value={
+          data
+            ? PRODUCT_LABELS[data.top_product.name] || data.top_product.name
+            : "—"
+        }
         sub={data ? formatNumber(data.top_product.value) : undefined}
         loading={loading}
         accent="success"
       />
       <KpiCard
         label="Lowest Product"
-        value={data ? data.lowest_product.name : "—"}
+        value={
+          data
+            ? PRODUCT_LABELS[data.lowest_product.name] ||
+              data.lowest_product.name
+            : "—"
+        }
         sub={data ? formatNumber(data.lowest_product.value) : undefined}
         loading={loading}
         accent="destructive"

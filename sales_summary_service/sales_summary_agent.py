@@ -114,6 +114,54 @@ PRODUCT_GROUPS: dict[str, dict[str, list[str]]] = {
 
 SUB_COLS = ["Target", "MTD Sales", "Yesterday Sales", "Achievement %"]
 
+# ---------------------------------------------------------------------------
+# Rows matching any of these keywords must never appear in the merged
+# output — they're not real field-sales customers (e-commerce channels,
+# test accounts, etc.), whatever the business decides to add here.
+#
+# TO EXCLUDE MORE NAMES: just add another string to this list. Matching is
+# case-insensitive and tolerant of spacing/hyphen differences, so adding
+# "e-commerce" also catches "E-Commerce", "e commerce", "Ecommerce", etc.
+# automatically — you don't need to add every spelling variant yourself.
+EXCLUDED_KEYWORDS: list[str] = [
+    "e-commerce",
+    "Non Trade_LIP",
+    "Non Trade_Export",
+    "Business Closed"
+    # "modern trade",
+    # "test account",
+]
+
+# Columns checked for the keywords above. A row is excluded if ANY of these
+# columns matches ANY keyword, regardless of which source file it came
+# from. Checked across every customer-info column (except SAP ID / Customer
+# Name, which identify the row rather than classify it) since real-world
+# exports have been seen marking this on Region, Area, Territory, TSM/TSE,
+# and/or ASM/KAM inconsistently — not reliably on any single one of them.
+EXCLUDED_MARKER_COLUMNS = [
+    "Customer Type",
+    "Region",
+    "Area",
+    "Territory",
+    "TSM/TSE",
+    "ASM/KAM",
+    "RSM/B2B Head",
+]
+
+
+def _keyword_to_pattern(keyword: str) -> str:
+    """Turn a plain-English keyword like "e-commerce" or "modern trade"
+    into a regex that matches it regardless of spacing/hyphen differences
+    ("e-commerce", "e commerce", "ecommerce" all match the same keyword).
+    """
+    words = [w for w in re.split(r"[\s\-]+", keyword.strip()) if w]
+    return r"[\s-]*".join(re.escape(w) for w in words)
+
+
+def _excluded_keywords_pattern() -> str:
+    patterns = [_keyword_to_pattern(k) for k in EXCLUDED_KEYWORDS if k.strip()]
+    return "|".join(patterns) if patterns else r"(?!)"  # never matches if list is empty
+
 # Fallback aliases used only when the primary "MTD Sales" alias for PCC+OPC
 # is missing, so a per-brand split (PCC MTD Sales + OPC MTD Sales) can be
 # summed instead of losing the figure entirely.
@@ -346,6 +394,29 @@ def normalize_territory(series: pd.Series) -> pd.Series:
     return series.astype(str).str.strip().str.lower().str.replace(r"\s+", " ", regex=True)
 
 
+def split_row_for_broadcast(row: pd.Series, n: int) -> pd.Series:
+    """Return a copy of `row` with its additive product figures (Target,
+    MTD Sales, Yesterday Sales) divided by `n`, so distributing one combined
+    row across `n` matching sub-rows doesn't multiply the real total by `n`.
+    Achievement % is cleared so it gets recomputed from the split figures
+    downstream instead of carrying over the pre-split ratio.
+    """
+    row = row.copy()
+    if n <= 1:
+        return row
+    for col in row.index:
+        col_str = str(col)
+        if "||" not in col_str:
+            continue
+        _group, sub_name = col_str.split("||", 1)
+        if sub_name in ("Target", "MTD Sales", "Yesterday Sales"):
+            value = row[col]
+            row[col] = (value / n) if pd.notna(value) else value
+        elif sub_name == "Achievement %":
+            row[col] = pd.NA
+    return row
+
+
 def apply_territory_fallback_matches(side1: pd.DataFrame, side2: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Recovers matches lost when one file numbers a customer's sub-distributor
     rows ("Acme 1", "Acme 2", "Acme 3"...) while the other file keeps a single
@@ -358,10 +429,19 @@ def apply_territory_fallback_matches(side1: pd.DataFrame, side2: pd.DataFrame) -
     For each SAP ID where some rows fail to match by name on *both* sides,
     this falls back to (SAP ID, Territory): when the side with exactly one
     unmatched row shares its Territory with one or more unmatched rows on the
-    other side, its figures are copied onto every one of those matching rows
-    (the combined total is broadcast onto each matching sub-row, rather than
-    split or dropped) by giving synthetic copies the sub-rows' `_join_name`
-    so the normal outer join naturally attaches them.
+    other side, its figures are attached to every one of those matching rows
+    by giving synthetic copies the sub-rows' `_join_name` so the normal outer
+    join naturally attaches them.
+
+    The combined row's additive figures (Target, MTD Sales, Yesterday Sales)
+    are split EVENLY across the N matching sub-rows rather than copied in
+    full onto each one — copying the total in full onto every sub-row would
+    make it count N times over in any downstream SUM() (e.g. dashboard KPI
+    totals), badly inflating figures relative to the source file. Each
+    split-off copy's Achievement % is left blank so it gets recomputed later
+    (MTD Sales / Target) from its own split share rather than inheriting the
+    original combined-row ratio, which would no longer match the split MTD
+    Sales figure.
 
     SAP IDs where neither side narrows down to exactly one unmatched row are
     left as-is (too ambiguous to guess safely) -- same as current behavior.
@@ -395,8 +475,9 @@ def apply_territory_fallback_matches(side1: pd.DataFrame, side2: pd.DataFrame) -
             agg_territory = territory2.loc[agg_row.name]
             targets = u1[territory1.loc[u1.index] == agg_territory]
             if len(targets) >= 1:
+                split_row = split_row_for_broadcast(agg_row, len(targets))
                 for sub_idx, sub in targets.iterrows():
-                    copy = agg_row.copy()
+                    copy = split_row.copy()
                     copy["_join_name"] = sub["_join_name"]
                     extra_side2_rows.append(copy)
                 consumed_side2_idx.append(agg_row.name)
@@ -408,8 +489,9 @@ def apply_territory_fallback_matches(side1: pd.DataFrame, side2: pd.DataFrame) -
             agg_territory = territory1.loc[agg_row.name]
             targets = u2[territory2.loc[u2.index] == agg_territory]
             if len(targets) >= 1:
+                split_row = split_row_for_broadcast(agg_row, len(targets))
                 for sub_idx, sub in targets.iterrows():
-                    copy = agg_row.copy()
+                    copy = split_row.copy()
                     copy["_join_name"] = sub["_join_name"]
                     extra_side1_rows.append(copy)
                 consumed_side1_idx.append(agg_row.name)
@@ -425,6 +507,37 @@ def apply_territory_fallback_matches(side1: pd.DataFrame, side2: pd.DataFrame) -
         side1 = pd.concat([side1, pd.DataFrame(extra_side1_rows)], ignore_index=True)
 
     return side1, side2
+
+
+def row_matches_excluded_keyword(df: pd.DataFrame) -> pd.Series:
+    """Boolean mask: True for rows where any marker column matches any
+    keyword in EXCLUDED_KEYWORDS, computed from this DataFrame's own data
+    only.
+    """
+    mask = pd.Series(False, index=df.index)
+    pattern = _excluded_keywords_pattern()
+    for col in EXCLUDED_MARKER_COLUMNS:
+        if col in df.columns:
+            values = df[col].astype(str).str.strip()
+            mask = mask | values.str.contains(pattern, regex=True, case=False, na=False)
+    return mask
+
+
+def get_excluded_sap_ids(df: pd.DataFrame) -> set[str]:
+    """SAP IDs (as normalized strings) flagged by any EXCLUDED_KEYWORDS
+    match anywhere in this DataFrame.
+    """
+    flagged = df.loc[row_matches_excluded_keyword(df), "SAP ID"].astype(str).str.strip()
+    return set(flagged)
+
+
+def filter_excluded_keyword_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop rows flagged by this DataFrame's own data. Only a first-line
+    filter — see the SAP-ID-level exclusion in build_merged_dataframe for
+    the cross-file-safe version, since a SAP ID can be flagged in one
+    source file while looking completely normal in the other.
+    """
+    return df[~row_matches_excluded_keyword(df)].reset_index(drop=True)
 
 
 def build_merged_dataframe(file1: LoadedFile, file2: LoadedFile) -> pd.DataFrame:
@@ -450,6 +563,19 @@ def build_merged_dataframe(file1: LoadedFile, file2: LoadedFile) -> pd.DataFrame
     side1 = pd.concat([info1, prod1], axis=1)
     side2 = pd.concat([info2, prod2], axis=1)
 
+    # Exclude rows matching any EXCLUDED_KEYWORDS entirely — from both
+    # sides, before fallback matching or the join. A SAP ID can be marked
+    # in only ONE of the two files while looking completely normal in the
+    # other (different files track different columns), so the exclusion
+    # set is built from BOTH sides' raw data first, then applied to both —
+    # filtering each side using only its own data would let the
+    # "normal-looking" file's copy of that SAP ID slip through the outer
+    # join.
+    excluded_sap_ids = get_excluded_sap_ids(side1) | get_excluded_sap_ids(side2)
+    if excluded_sap_ids:
+        side1 = side1[~side1["SAP ID"].isin(excluded_sap_ids)].reset_index(drop=True)
+        side2 = side2[~side2["SAP ID"].isin(excluded_sap_ids)].reset_index(drop=True)
+
     # Recover rows that would otherwise be lost/stranded because one file
     # numbers sub-distributor rows while the other keeps a single combined
     # row for the same SAP ID (see docstring above).
@@ -474,6 +600,13 @@ def build_merged_dataframe(file1: LoadedFile, file2: LoadedFile) -> pd.DataFrame
             merged.rename(columns={col_f1: canonical}, inplace=True)
         elif col_f2 in merged.columns:
             merged.rename(columns={col_f2: canonical}, inplace=True)
+
+    # Second pass: filtering side1/side2 independently before the join
+    # misses a SAP ID that's flagged in only ONE of the two files — the
+    # outer join still pulls it back in using the other file's (unflagged)
+    # data. Re-check the final coalesced columns so a flag from either
+    # source file excludes the row, no matter which side carried it.
+    merged = filter_excluded_keyword_rows(merged)
 
     return merged
 

@@ -34,7 +34,11 @@ const COLORS = [
   "#3b82f6","#10b981","#f59e0b","#ef4444",
   "#8b5cf6","#06b6d4","#ec4899","#84cc16",
 ];
-
+const PRODUCT_LABELS: Record<string, string> = {
+  "PLC": "Supercrete",
+  "PLC+": "Supercrete +",
+  "PCC + OPC": "Holcim",
+};
 interface Props {
   filters: FilterParams;
 }
@@ -532,7 +536,7 @@ export function DeepInsightsPage({ filters }: Props) {
           </div>
 
           {/* Product Concentration */}
-          <div id="chart-product-concentration">
+<div id="chart-product-concentration">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-semibold">Product Concentration Risk</h3>
               <button
@@ -545,13 +549,18 @@ export function DeepInsightsPage({ filters }: Props) {
             <ResponsiveContainer width="100%" height={250}>
               <BarChart data={data.risks.product_concentration} margin={{ left: 10, right: 10 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="name" fontSize={10} stroke="var(--muted-foreground)" />
+                <XAxis
+                  dataKey="name"
+                  fontSize={10}
+                  stroke="var(--muted-foreground)"
+                  tickFormatter={(value: string) => PRODUCT_LABELS[value] || value}
+                />
                 <YAxis tickFormatter={(v) => `${v}%`} fontSize={10} stroke="var(--muted-foreground)" />
                 <Tooltip
                   content={({ active, payload, label }: any) =>
                     active && payload?.length ? (
                       <div className="rounded-lg border bg-popover px-3 py-2 text-xs shadow-lg">
-                        <div className="font-semibold">{label}</div>
+                        <div className="font-semibold">{PRODUCT_LABELS[label] || label}</div>
                         <div>Share: {payload[0].payload.pct}%</div>
                         <div>Impact if -20%: {formatNumber(payload[0].payload.impact_if_dropped_20pct)}</div>
                       </div>

@@ -142,3 +142,60 @@ CREATE TABLE email_recipients (
 );
 
 CREATE INDEX idx_email_recipients_admin ON email_recipients(admin_user_id);
+
+-- ============================================================
+-- Duplicate-row prevention for sales_current / sales_archived.
+--
+-- Root cause: the merge service (sales_summary_agent.py) previously
+-- broadcast one combined-row's full totals onto every matching
+-- sub-distributor row for a shared sap_id, inflating dashboard KPI
+-- sums. That's now fixed at the merge-service level (values are split
+-- evenly instead of copied), but nothing at the DB layer enforced this,
+-- so this constraint adds defense-in-depth: it blocks a true accidental
+-- duplicate row (same upload_date + sap_id + customer_name inserted
+-- more than once), while still allowing legitimate multiple
+-- sub-distributor rows that share a sap_id under different
+-- customer_names.
+--
+-- IMPORTANT: run the duplicate-check query below FIRST and clean up
+-- any existing duplicates (e.g. by re-running today's upload through
+-- the fixed merge script) before this migration runs, or the
+-- ALTER TABLE inside the DO block will fail with a duplicate-key error.
+--
+-- SELECT upload_date, sap_id, customer_name, COUNT(*)
+-- FROM sales_current
+-- GROUP BY upload_date, sap_id, customer_name
+-- HAVING COUNT(*) > 1;
+--
+-- SELECT upload_date, sap_id, customer_name, COUNT(*)
+-- FROM sales_archived
+-- GROUP BY upload_date, sap_id, customer_name
+-- HAVING COUNT(*) > 1;
+--
+-- Wrapped in DO blocks (rather than plain ALTER TABLE ... ADD CONSTRAINT)
+-- so this file stays safe to re-run, matching the IF NOT EXISTS style
+-- used everywhere else in this schema — Postgres has no
+-- "ADD CONSTRAINT IF NOT EXISTS", so this is the idempotent equivalent.
+-- ============================================================
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'sales_current_date_sap_name_unique'
+  ) THEN
+    ALTER TABLE sales_current
+      ADD CONSTRAINT sales_current_date_sap_name_unique
+      UNIQUE (upload_date, sap_id, customer_name);
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'sales_archived_date_sap_name_unique'
+  ) THEN
+    ALTER TABLE sales_archived
+      ADD CONSTRAINT sales_archived_date_sap_name_unique
+      UNIQUE (upload_date, sap_id, customer_name);
+  END IF;
+END $$;

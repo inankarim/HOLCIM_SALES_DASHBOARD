@@ -18,24 +18,15 @@ import { ImageDown } from "lucide-react";
 import type { FilterParams } from "../../api/salesApi";
 
 const COLORS = [
-  "#3b82f6","#10b981","#f59e0b","#ef4444",
-  "#8b5cf6","#06b6d4",
+  "#3b82f6", "#10b981", "#f59e0b", "#ef4444",
+  "#8b5cf6", "#06b6d4", "#ec4899", "#22c55e",
 ];
-
-// getByProduct returns each row's `name` as the short code (PLC, PLC+, ...).
-// Only these three get relabeled; anything not listed here (Powercrete, HWP,
-// HCG) falls through to its original short code via the `|| value` fallback.
-const PRODUCT_LABELS: Record<string, string> = {
-  "PLC": "Supercrete",
-  "PLC+": "Supercrete +",
-  "PCC + OPC": "Holcim",
-};
 
 interface Props {
   filters: FilterParams;
 }
 
-export function ProductComparisonChart({ filters }: Props) {
+export function CustomerTypeSalesChart({ filters }: Props) {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,24 +36,29 @@ export function ProductComparisonChart({ filters }: Props) {
     setLoading(true);
     setError(null);
     salesApi
-      .getByProduct(filters)
-      .then((res) => setData(res.data.data || []))
-      .catch(() => setError("Failed to load product data"))
+      .getByCustomerType(filters)
+      .then((res) => {
+        // Defensive filter — backend already excludes 0-total types via
+        // HAVING, but this guards against stale/cached responses too.
+        const rows = (res.data.data || []).filter((r: any) => Number(r.total) > 0);
+        setData(rows);
+      })
+      .catch(() => setError("Failed to load customer type data"))
       .finally(() => setLoading(false));
   }, [filters]);
 
   const exportPng = () => {
-  exportChartToPng(chartRef.current, "Product-Comparison.png");
-};
+    exportChartToPng(chartRef.current, "Customer-Type-Sales.png");
+  };
 
   return (
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle className="text-base">Product Comparison</CardTitle>
+            <CardTitle className="text-base">Total Sales by Customer Type</CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Top to lowest selling products
+              Total volume across all products, grouped by customer type
             </p>
           </div>
           <button
@@ -81,7 +77,7 @@ export function ProductComparisonChart({ filters }: Props) {
             {error}
           </div>
         ) : (
-          <div ref={chartRef}>
+          <div ref={chartRef} style={{ background: "#ffffff" }}>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart
                 data={data}
@@ -89,10 +85,9 @@ export function ProductComparisonChart({ filters }: Props) {
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
-                  dataKey="name"
+                  dataKey="customer_type"
                   fontSize={10}
                   stroke="var(--muted-foreground)"
-                  tickFormatter={(value: string) => PRODUCT_LABELS[value] || value}
                 />
                 <YAxis
                   tickFormatter={formatNumber}
@@ -105,39 +100,26 @@ export function ProductComparisonChart({ filters }: Props) {
                   content={({ active, payload, label }: any) =>
                     active && payload?.length ? (
                       <div className="rounded-lg border bg-popover px-3 py-2 text-xs shadow-lg">
-                        <div className="font-semibold">
-                          {PRODUCT_LABELS[label] || label}
-                        </div>
+                        <div className="font-semibold">{label}</div>
                         <div>{formatNumber(payload[0].value)}</div>
                         <div className="text-muted-foreground">
-                          {payload[0].payload.pct?.toFixed(1)}%
+                          {payload[0].payload.pct?.toFixed(1)}% of total
                         </div>
                       </div>
                     ) : null
                   }
                 />
-<Bar dataKey="value" radius={[6, 6, 0, 0]}>
-  <LabelList
-    dataKey="value"
-    position="top"
-    content={({ x, y, width, value }) => (
-      <text
-        x={(x as number) + (width as number) / 2}
-        y={(y as number) - 8}
-        textAnchor="middle"
-        fontSize={11}
-        fontWeight="600"
-        fill="var(--foreground)"
-      >
-        {formatNumber(Number(value))}
-      </text>
-    )}
-  />
-
-  {data.map((_: any, i: number) => (
-    <Cell key={i} fill={COLORS[i % COLORS.length]} />
-  ))}
-</Bar>
+                <Bar dataKey="total" radius={[6, 6, 0, 0]}>
+                  <LabelList
+                    dataKey="total"
+                    position="top"
+                    formatter={(v: any) => formatNumber(Number(v))}
+                    style={{ fontSize: 11, fontWeight: 600, fill: "var(--foreground)" }}
+                  />
+                  {data.map((_: any, i: number) => (
+                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>

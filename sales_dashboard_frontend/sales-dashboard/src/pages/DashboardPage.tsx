@@ -9,6 +9,9 @@ import { TerritoryChart } from "../components/charts/TerritoryChart";
 import { TreemapChart } from "../components/charts/TreemapChart";
 import { CustomerChart } from "../components/charts/CustomerChart";
 import { InsightsPanel } from "../components/shared/InsightsPanel";
+import { CustomerTypeSalesChart } from "../components/charts/ Customertypesaleschart";
+import { CustomerTypeProductChart } from "../components/charts/Customertypeproductchart";
+
 import type { FilterParams } from "../api/salesApi";
 
 interface Props {
@@ -40,6 +43,15 @@ export function DashboardPage({ filters }: Props) {
         </div>
         <div id="chart-product-comparison">
           <ProductComparisonChart filters={filters} />
+        </div>
+      </div>
+
+      <div className="grid gap-6 md:grid-cols-2">
+        <div id="chart-customer-type-sales">
+          <CustomerTypeSalesChart filters={filters} />
+        </div>
+        <div id="chart-customer-type-product">
+          <CustomerTypeProductChart filters={filters} />
         </div>
       </div>
 

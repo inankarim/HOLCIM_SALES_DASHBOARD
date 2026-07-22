@@ -19,6 +19,15 @@ const COLORS = [
   "#8b5cf6","#06b6d4",
 ];
 
+// getByProduct returns each row's `name` as the short code (PLC, PLC+, ...).
+// Only these three get relabeled; anything not listed here (Powercrete, HWP,
+// HCG) falls through to its original short code via the `|| value` fallback.
+const PRODUCT_LABELS: Record<string, string> = {
+  "PLC": "Supercrete",
+  "PLC+": "Supercrete +",
+  "PCC + OPC": "Holcim",
+};
+
 interface Props {
   filters: FilterParams;
 }
@@ -82,8 +91,8 @@ export function ProductMixChart({ filters }: Props) {
                   outerRadius={100}
                   paddingAngle={3}
                   label={({ name, percent }: any) =>
-  `${name} (${((percent ?? 0) * 100).toFixed(1)}%)`
-}
+                    `${PRODUCT_LABELS[name] || name} (${((percent ?? 0) * 100).toFixed(1)}%)`
+                  }
                 >
                   {data.map((_: any, i: number) => (
                     <Cell key={i} fill={COLORS[i % COLORS.length]} />
@@ -94,7 +103,9 @@ export function ProductMixChart({ filters }: Props) {
                   content={({ active, payload }: any) =>
                     active && payload?.length ? (
                       <div className="rounded-lg border bg-popover px-3 py-2 text-xs shadow-lg">
-                        <div className="font-semibold">{payload[0].name}</div>
+                        <div className="font-semibold">
+                          {PRODUCT_LABELS[payload[0].name] || payload[0].name}
+                        </div>
                         <div>{formatNumber(payload[0].value)}</div>
                         <div className="text-muted-foreground">
                           {payload[0].payload.pct?.toFixed(1)}%
@@ -105,7 +116,7 @@ export function ProductMixChart({ filters }: Props) {
                 />
                 <Legend
                   formatter={(value) => (
-                    <span className="text-xs">{value}</span>
+                    <span className="text-xs">{PRODUCT_LABELS[value] || value}</span>
                   )}
                 />
               </PieChart>

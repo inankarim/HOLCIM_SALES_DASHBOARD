@@ -59,6 +59,13 @@ export const salesApi = {
   getByRegion: (params: FilterParams) =>
     http.get("/api/sales/by-region", { params }),
 
+  // GET /api/sales/by-customer-type → getByCustomerType
+  // Returns: { date_used, grand_total, data: [{ customer_type, plc_mtd_sales,
+  //            plc_plus_mtd_sales, powercrete_mtd_sales, pcc_opc_mtd_sales,
+  //            hwp_mtd_sales, hcg_mtd_sales, total, pct }] }
+  getByCustomerType: (params: FilterParams) =>
+    http.get("/api/sales/by-customer-type", { params }),
+
   // GET /api/sales/by-product → getByProduct
   // Returns: { date_used, total, data: [{ name, value, pct }] }
   // name values: "PLC", "PLC+", "Powercrete", "PCC + OPC", "HWP", "HCG"

@@ -27,6 +27,7 @@ const CHART_JOBS = [
   { id: "chart-heatmap",            label: "Heatmap" },
   { id: "chart-area",               label: "Area-Performance" },
   { id: "chart-territory",          label: "Territory-Ranking" },
+  { id: "chart-customer-type",      label: "Customer-Type-Sales" },
 ] as const;
 // ↑ Customer-Analytics removed per design spec
 
@@ -48,6 +49,7 @@ const DISPLAY_LABELS: Record<JobLabel, string> = {
   "Heatmap":             "Region × Product Heatmap",
   "Area-Performance":    "Area Performance",
   "Territory-Ranking":   "Territory Ranking",
+  "Customer-Type-Sales": "Customer Type Sales",
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
