@@ -10,11 +10,10 @@ import {
   Tooltip,
   Legend,
   CartesianGrid,
-  Cell,
   LabelList,
 } from "recharts";
 import { formatNumber } from "../../lib/formatNumber";
-import { ImageDown, TrendingDown, TrendingUp } from "lucide-react";
+import { ImageDown } from "lucide-react";
 import { exportChartToPng } from "../../lib/exportPng";
 import type { FilterParams } from "../../api/salesApi";
 
@@ -25,24 +24,17 @@ interface Props {
 interface ProductRow {
   key: string;
   label: string;
-  mtd: number;
   target: number;
-  ach: number;
+  mtd: number;
+  yesterday: number;
 }
 
-// Achievement thresholds — tune to whatever the business considers on-track
-function statusColor(ach: number) {
-  if (ach >= 100) return { bar: "#2563eb", text: "#1d4ed8", bg: "#eff6ff" }; // ahead of target
-  if (ach >= 95) return { bar: "#16a34a", text: "#15803d", bg: "#f0fdf4" };
-  if (ach >= 80) return { bar: "#f59e0b", text: "#b45309", bg: "#fffbeb" };
-  return { bar: "#dc2626", text: "#b91c1c", bg: "#fef2f2" };
-}
+const TARGET_COLOR = "#cbd5e1";
+const MTD_COLOR = "#2563eb";
+const YESTERDAY_COLOR = "#f59e0b";
 
 export function TargetAttainmentChart({ filters }: Props) {
   const [rows, setRows] = useState<ProductRow[]>([]);
-  const [totalMtd, setTotalMtd] = useState(0);
-  const [totalTarget, setTotalTarget] = useState(0);
-  const [overallAch, setOverallAch] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const chartRef = useRef<HTMLDivElement>(null);
@@ -57,34 +49,37 @@ export function TargetAttainmentChart({ filters }: Props) {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    salesApi
-      .getMtdTargetByProduct(filters)
-      .then((res) => {
-        const d = res.data || {};
-        const mapped: ProductRow[] = (d.data || []).map((p: any) => ({
+
+    Promise.all([
+      salesApi.getMtdTargetByProduct(filters),
+      salesApi.getYesterdayByProduct(filters),
+    ])
+      .then(([mtdRes, yestRes]) => {
+        const mtdData = mtdRes.data?.data || [];
+        const yestData = yestRes.data?.data || [];
+
+        // yesterday response is keyed by product name only (no `key`),
+        // so index it by name to merge onto the mtd rows.
+        const yestByName = new Map(
+          yestData.map((p: any) => [p.name, Number(p.value) || 0]),
+        );
+
+        const merged: ProductRow[] = mtdData.map((p: any) => ({
           key: p.key,
           label: p.name,
-          mtd: Number(p.mtd_sales) || 0,
           target: Number(p.target) || 0,
-          ach: Number(p.achievement_pct) || 0,
+          mtd: Number(p.mtd_sales) || 0,
+          yesterday: yestByName.get(p.name) ?? 0,
         }));
-        setRows(mapped);
-        setTotalMtd(Number(d.total_mtd_sales) || 0);
-        setTotalTarget(Number(d.total_target) || 0);
-        setOverallAch(Number(d.overall_achievement_pct) || 0);
+
+        setRows(merged);
       })
-      .catch(() => setError("Failed to load target data"))
+      .catch(() => setError("Failed to load chart data"))
       .finally(() => setLoading(false));
   }, [filters]);
 
-  const overallColor = statusColor(overallAch);
-
-  const sorted = [...rows].sort((a, b) => a.ach - b.ach);
-  const worst = sorted[0];
-  const best = sorted[sorted.length - 1];
-
   const exportPng = () => {
-    exportChartToPng(chartRef.current, "Target-Attainment.png");
+    exportChartToPng(chartRef.current, "Target-vs-MTD-vs-Yesterday.png");
   };
 
   return (
@@ -92,9 +87,9 @@ export function TargetAttainmentChart({ filters }: Props) {
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle className="text-base">MTD Target Attainment</CardTitle>
+            <CardTitle className="text-base">Target vs MTD vs Yesterday</CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">
-              MTD sales vs target, product by product
+              Sales comparison, product by product
             </p>
           </div>
           <button
@@ -113,59 +108,13 @@ export function TargetAttainmentChart({ filters }: Props) {
             {error}
           </div>
         ) : (
-          <div ref={chartRef} style={{ background: "#ffffff" }} className="space-y-4">
-            {/* Overall company headline */}
-            <div
-              className="rounded-xl p-4 flex flex-wrap items-center justify-between gap-4"
-              style={{ backgroundColor: overallColor.bg }}
-            >
-              <div>
-                <p className="text-xs font-medium text-muted-foreground">
-                  Company-wide MTD
-                </p>
-                <p className="text-2xl font-bold" style={{ color: overallColor.text }}>
-                  {overallAch.toFixed(1)}% of target
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {formatNumber(totalMtd)} sold against {formatNumber(totalTarget)} target
-                </p>
-              </div>
-              <div className="flex gap-6 text-xs">
-                {best && (
-                  <div className="flex items-center gap-1.5">
-                    <TrendingUp className="h-4 w-4 text-emerald-600" />
-                    <div>
-                      <div className="font-semibold">{best.label}</div>
-                      <div className="text-muted-foreground">
-                        {best.ach >= 100
-                          ? `${(best.ach - 100).toFixed(0)}% over target`
-                          : `${best.ach.toFixed(0)}% of target`}
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {worst && (
-                  <div className="flex items-center gap-1.5">
-                    <TrendingDown className="h-4 w-4 text-red-600" />
-                    <div>
-                      <div className="font-semibold">{worst.label}</div>
-                      <div className="text-muted-foreground">
-                        {(100 - worst.ach).toFixed(0)}% behind target
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Grouped bars: MTD sales vs Target, thin bars, tight spacing */}
-            {/* Extra top margin makes room for the value + % labels stacked above/inside each bar */}
-            <ResponsiveContainer width="100%" height={isMobile ? 280 : 320}>
+          <div ref={chartRef} style={{ background: "#ffffff" }}>
+            <ResponsiveContainer width="100%" height={isMobile ? 300 : 360}>
               <BarChart
-                data={sorted}
-                margin={{ top: 32, right: 10, left: 0, bottom: 5 }}
+                data={rows}
+                margin={{ top: 28, right: 10, left: 10, bottom: 5 }}
                 barGap={3}
-                barCategoryGap="28%"
+                barCategoryGap="24%"
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                 <XAxis
@@ -181,30 +130,28 @@ export function TargetAttainmentChart({ filters }: Props) {
                   tickFormatter={formatNumber}
                   fontSize={9}
                   stroke="var(--muted-foreground)"
-                  width={40}
+                  width={55}
                 />
                 <Tooltip
                   content={({ active, payload }: any) =>
                     active && payload?.length ? (
                       <div className="rounded-lg border bg-popover px-3 py-2 text-xs shadow-lg">
                         <div className="font-semibold">{payload[0].payload.label}</div>
-                        <div>MTD: {formatNumber(payload[0].payload.mtd)}</div>
                         <div>Target: {formatNumber(payload[0].payload.target)}</div>
-                        <div className="font-medium mt-1">
-                          {payload[0].payload.ach.toFixed(1)}% of target
-                        </div>
+                        <div>MTD: {formatNumber(payload[0].payload.mtd)}</div>
+                        <div>Yesterday: {formatNumber(payload[0].payload.yesterday)}</div>
                       </div>
                     ) : null
                   }
                 />
                 <Legend
                   wrapperStyle={{ fontSize: 11 }}
-                  formatter={(value) => (value === "target" ? "Target" : "MTD Sales")}
+                  formatter={(value) =>
+                    value === "target" ? "Target" : value === "mtd" ? "MTD Sales" : "Yesterday"
+                  }
                 />
 
-                {/* Target — thin grey reference bar */}
-                <Bar dataKey="target" fill="#cbd5e1" radius={[3, 3, 0, 0]} maxBarSize={16}>
-                  {/* Target value shown above the bar; hidden on mobile where space is tight */}
+                <Bar dataKey="target" fill={TARGET_COLOR} radius={[3, 3, 0, 0]} maxBarSize={16}>
                   <LabelList
                     dataKey="target"
                     position="top"
@@ -213,24 +160,21 @@ export function TargetAttainmentChart({ filters }: Props) {
                   />
                 </Bar>
 
-                {/* MTD sales — colored by achievement, can visibly clear the target bar */}
-                <Bar dataKey="mtd" radius={[3, 3, 0, 0]} maxBarSize={16}>
-                  {sorted.map((row) => (
-                    <Cell key={row.key} fill={statusColor(row.ach).bar} />
-                  ))}
-                  {/* Actual MTD value, always visible (not just on hover) so it shows up in PNG exports too */}
+                <Bar dataKey="mtd" fill={MTD_COLOR} radius={[3, 3, 0, 0]} maxBarSize={16}>
                   <LabelList
                     dataKey="mtd"
                     position="top"
                     formatter={(v: any) => formatNumber(v)}
                     style={{ fontSize: isMobile ? 8 : 10, fontWeight: 600, fill: "#111827" }}
                   />
-                  {/* Achievement % sits inside the bar near the top so it doesn't collide with the value label above */}
+                </Bar>
+
+                <Bar dataKey="yesterday" fill={YESTERDAY_COLOR} radius={[3, 3, 0, 0]} maxBarSize={16}>
                   <LabelList
-                    dataKey="ach"
-                    position="insideTop"
-                    formatter={(v: any) => `${Number(v).toFixed(0)}%`}
-                    style={{ fontSize: isMobile ? 8 : 9, fontWeight: 700, fill: "#ffffff" }}
+                    dataKey="yesterday"
+                    position="top"
+                    formatter={(v: any) => formatNumber(v)}
+                    style={{ fontSize: isMobile ? 8 : 10, fontWeight: 600, fill: "#111827" }}
                   />
                 </Bar>
               </BarChart>
