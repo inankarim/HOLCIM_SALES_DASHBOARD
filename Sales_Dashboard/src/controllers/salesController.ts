@@ -951,6 +951,14 @@ export const getInsights = async (
     const territories_list = territoryResult.rows;
     const customers_list = customerResult.rows;
 
+    // Exclude customers with zero total sales when picking the lowest customer,
+    // since a 0-total "lowest customer" isn't a meaningful insight.
+    const nonZeroCustomers = customers_list.filter((c) => Number(c.total) > 0);
+    const lowestCustomerRow =
+      nonZeroCustomers.length > 0
+        ? nonZeroCustomers[nonZeroCustomers.length - 1]
+        : undefined;
+
     res.json({
       date_used: defaultDate,
       best_region: {
@@ -972,8 +980,8 @@ export const getInsights = async (
         value: Number(customers_list[0]?.total ?? 0),
       },
       lowest_customer: {
-        name: customers_list[customers_list.length - 1]?.customer_name,
-        value: Number(customers_list[customers_list.length - 1]?.total ?? 0),
+        name: lowestCustomerRow?.customer_name,
+        value: Number(lowestCustomerRow?.total ?? 0),
       },
       most_sold_product: {
         name: productEntries[0]?.[0],

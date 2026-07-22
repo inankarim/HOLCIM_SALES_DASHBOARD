@@ -9,6 +9,21 @@ interface Props {
   filters: FilterParams;
 }
 
+// Maps raw product codes to friendly display labels.
+// Keys are matched with all whitespace stripped and lowercased, so
+// "PCC + OPC", "pcc+opc", "PCC+OPC" etc. all resolve to the same label.
+const PRODUCT_LABELS: Record<string, string> = {
+  "plc": "Supercreate",
+  "plc+": "Supercreate +",
+  "pcc+opc": "Holcim",
+};
+
+function getProductLabel(name?: string | null): string {
+  if (!name) return "";
+  const key = name.replace(/\s+/g, "").toLowerCase();
+  return PRODUCT_LABELS[key] ?? name;
+}
+
 export function InsightsPanel({ filters }: Props) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -94,7 +109,7 @@ export function InsightsPanel({ filters }: Props) {
       color: "text-green-500",
       text: (
         <>
-          Most sold product: <b>{data.most_sold_product?.name}</b> (
+          Most sold product: <b>{getProductLabel(data.most_sold_product?.name)}</b> (
           {formatNumber(data.most_sold_product?.value ?? 0)})
         </>
       ),
@@ -104,7 +119,7 @@ export function InsightsPanel({ filters }: Props) {
       color: "text-red-500",
       text: (
         <>
-          Least sold product: <b>{data.least_sold_product?.name}</b> (
+          Least sold product: <b>{getProductLabel(data.least_sold_product?.name)}</b> (
           {formatNumber(data.least_sold_product?.value ?? 0)})
         </>
       ),
@@ -114,7 +129,7 @@ export function InsightsPanel({ filters }: Props) {
         color: "text-blue-500",
         text: (
             <>
-            <b>{d.region}</b> relies on <b>{d.top_product}</b> for {d.pct}% of its sales.
+            <b>{d.region}</b> relies on <b>{getProductLabel(d.top_product)}</b> for {d.pct}% of its sales.
             </>
         ),
     })),
