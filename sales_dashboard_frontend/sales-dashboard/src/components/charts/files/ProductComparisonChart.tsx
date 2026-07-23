@@ -16,7 +16,7 @@ import { formatNumber } from "../../lib/formatNumber";
 import { exportChartToPng } from "../../lib/exportPng";
 import { ImageDown } from "lucide-react";
 import type { FilterParams } from "../../api/salesApi";
-import { getProductColor, getProductLabel } from "../../lib/products";
+import { getProductColor, getProductLabel } from "../config/products";
 
 interface Props {
   filters: FilterParams;

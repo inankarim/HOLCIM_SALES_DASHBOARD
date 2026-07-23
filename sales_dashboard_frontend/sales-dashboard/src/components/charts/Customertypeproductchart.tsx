@@ -15,26 +15,17 @@ import { formatNumber } from "../../lib/formatNumber";
 import { ImageDown } from "lucide-react";
 import { exportChartToPng } from "../../lib/exportPng";
 import type { FilterParams } from "../../api/salesApi";
+import {
+  PRODUCT_CODES,
+  PRODUCT_DATA_KEYS,
+  getProductColor,
+  getProductLabel,
+} from "../../lib/products";
 
-const PRODUCTS = [
-  "plc_mtd_sales",
-  "plc_plus_mtd_sales",
-  "powercrete_mtd_sales",
-  "pcc_opc_mtd_sales",
-  "hwp_mtd_sales",
-  "hcg_mtd_sales",
-];
+const ALL_PRODUCT_KEYS = PRODUCT_CODES.map((code) => PRODUCT_DATA_KEYS[code]);
 
-// Same relabeling used across the dashboard's product charts.
-const PRODUCT_LABELS: Record<string, string> = {
-  plc_mtd_sales: "Supercrete",
-  plc_plus_mtd_sales: "Supercrete +",
-  powercrete_mtd_sales: "Powercrete",
-  pcc_opc_mtd_sales: "Holcim",
-  hwp_mtd_sales: "HWP",
-  hcg_mtd_sales: "HCG",
-};
-
+// filters.product arrives as a short code (e.g. "PLC+", "Holcim SS") — this
+// maps it to the *_mtd_sales column used for stacking.
 const PRODUCT_KEY_MAP: Record<string, string> = {
   "PLC": "plc_mtd_sales",
   "PLC+": "plc_plus_mtd_sales",
@@ -42,15 +33,6 @@ const PRODUCT_KEY_MAP: Record<string, string> = {
   "Holcim SS": "pcc_opc_mtd_sales",
   "HWP": "hwp_mtd_sales",
   "HCG": "hcg_mtd_sales",
-};
-
-const COLORS: Record<string, string> = {
-  plc_mtd_sales: "#3b82f6",
-  plc_plus_mtd_sales: "#10b981",
-  powercrete_mtd_sales: "#f59e0b",
-  pcc_opc_mtd_sales: "#ec4899",
-  hwp_mtd_sales: "#22c55e",
-  hcg_mtd_sales: "#ef4444",
 };
 
 interface Props {
@@ -87,7 +69,7 @@ export function CustomerTypeProductChart({ filters }: Props) {
 
   const activeProducts = filters.product
     ? [PRODUCT_KEY_MAP[filters.product]].filter(Boolean)
-    : PRODUCTS;
+    : ALL_PRODUCT_KEYS;
 
   const chartData = [...data]
     .map((item) => ({
@@ -191,7 +173,7 @@ export function CustomerTypeProductChart({ filters }: Props) {
                                   className="inline-block h-2 w-2 rounded-sm"
                                   style={{ backgroundColor: p.fill }}
                                 />
-                                {PRODUCT_LABELS[p.dataKey] || p.dataKey}
+                                {getProductLabel(p.dataKey)}
                               </span>
                               <span className="font-medium">
                                 {formatNumber(Number(p.value))}
@@ -210,9 +192,7 @@ export function CustomerTypeProductChart({ filters }: Props) {
                 <Legend
                   wrapperStyle={{ paddingTop: 12 }}
                   formatter={(value) => (
-                    <span style={{ fontSize: isMobile ? 9 : 11 }}>
-                      {PRODUCT_LABELS[value] || value}
-                    </span>
+                    <span style={{ fontSize: isMobile ? 9 : 11 }}>{getProductLabel(value)}</span>
                   )}
                 />
 
@@ -223,7 +203,7 @@ export function CustomerTypeProductChart({ filters }: Props) {
                       key={product}
                       dataKey={product}
                       stackId="a"
-                      fill={COLORS[product]}
+                      fill={getProductColor(product)}
                       radius={isTop ? [4, 4, 0, 0] : [0, 0, 0, 0]}
                       maxBarSize={72}
                     />

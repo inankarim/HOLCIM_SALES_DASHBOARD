@@ -3,26 +3,23 @@ import { salesApi } from "../../api/salesApi";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import {
   ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  LabelList,
+  PieChart,
+  Pie,
   Cell,
+  Tooltip,
+  Legend
 } from "recharts";
 import { formatNumber } from "../../lib/formatNumber";
-import { exportChartToPng } from "../../lib/exportPng";
 import { ImageDown } from "lucide-react";
+import { exportChartToPng } from "../../lib/exportPng";
 import type { FilterParams } from "../../api/salesApi";
-import { getProductColor, getProductLabel } from "../../lib/products";
+import { getProductColor, getProductLabel } from "../config/products";
 
 interface Props {
   filters: FilterParams;
 }
 
-export function ProductComparisonChart({ filters }: Props) {
+export function ProductMixChart({ filters }: Props) {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +36,7 @@ export function ProductComparisonChart({ filters }: Props) {
   }, [filters]);
 
   const exportPng = () => {
-    exportChartToPng(chartRef.current, "Product-Comparison.png");
+    exportChartToPng(chartRef.current, "Product-Mix.png");
   };
 
   return (
@@ -47,9 +44,9 @@ export function ProductComparisonChart({ filters }: Props) {
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle className="text-base">Product Comparison</CardTitle>
+            <CardTitle className="text-base">Product Mix</CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Top to lowest selling products
+              Total volume share by product
             </p>
           </div>
           <button
@@ -68,32 +65,32 @@ export function ProductComparisonChart({ filters }: Props) {
             {error}
           </div>
         ) : (
-          <div ref={chartRef}>
+          <div ref={chartRef} className="bg-white p-2 rounded">
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart
-                data={data}
-                margin={{ left: 10, right: 10, top: 32, bottom: 5 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis
-                  dataKey="name"
-                  fontSize={10}
-                  stroke="var(--muted-foreground)"
-                  tickFormatter={(value: string) => getProductLabel(value) || value}
-                />
-                <YAxis
-                  tickFormatter={formatNumber}
-                  fontSize={10}
-                  stroke="var(--muted-foreground)"
-                  domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.15)]}
-                />
+              <PieChart>
+                <Pie
+                  data={data}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={100}
+                  paddingAngle={3}
+                  label={({ name, percent }: any) =>
+                    `${getProductLabel(name) || name} (${((percent ?? 0) * 100).toFixed(1)}%)`
+                  }
+                >
+                  {data.map((d: any, i: number) => (
+                    <Cell key={i} fill={getProductColor(d.name)} />
+                  ))}
+                </Pie>
                 <Tooltip
-                  cursor={{ fill: "var(--muted)" }}
-                  content={({ active, payload, label }: any) =>
+                  content={({ active, payload }: any) =>
                     active && payload?.length ? (
                       <div className="rounded-lg border bg-popover px-3 py-2 text-xs shadow-lg">
                         <div className="font-semibold">
-                          {getProductLabel(label) || label}
+                          {getProductLabel(payload[0].name) || payload[0].name}
                         </div>
                         <div>{formatNumber(payload[0].value)}</div>
                         <div className="text-muted-foreground">
@@ -103,29 +100,12 @@ export function ProductComparisonChart({ filters }: Props) {
                     ) : null
                   }
                 />
-                <Bar dataKey="value" radius={[6, 6, 0, 0]}>
-                  <LabelList
-                    dataKey="value"
-                    position="top"
-                    content={({ x, y, width, value }) => (
-                      <text
-                        x={(x as number) + (width as number) / 2}
-                        y={(y as number) - 8}
-                        textAnchor="middle"
-                        fontSize={11}
-                        fontWeight="600"
-                        fill="var(--foreground)"
-                      >
-                        {formatNumber(Number(value))}
-                      </text>
-                    )}
-                  />
-
-                  {data.map((d: any, i: number) => (
-                    <Cell key={i} fill={getProductColor(d.name)} />
-                  ))}
-                </Bar>
-              </BarChart>
+                <Legend
+                  formatter={(value) => (
+                    <span className="text-xs">{getProductLabel(value) || value}</span>
+                  )}
+                />
+              </PieChart>
             </ResponsiveContainer>
           </div>
         )}

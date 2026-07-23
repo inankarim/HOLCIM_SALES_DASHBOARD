@@ -20,7 +20,7 @@ import {
   PRODUCT_DATA_KEYS,
   getProductColor,
   getProductLabel,
-} from "../../lib/products";
+} from "../config/products";
 
 const ALL_PRODUCT_KEYS = PRODUCT_CODES.map((code) => PRODUCT_DATA_KEYS[code]);
 
@@ -39,7 +39,7 @@ interface Props {
   filters: FilterParams;
 }
 
-export function AreaChart({ filters }: Props) {
+export function CustomerTypeProductChart({ filters }: Props) {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,9 +56,14 @@ export function AreaChart({ filters }: Props) {
     setLoading(true);
     setError(null);
     salesApi
-      .getByArea(filters)
-      .then((res) => setData(res.data.data || []))
-      .catch(() => setError("Failed to load area data"))
+      .getByCustomerType(filters)
+      .then((res) => {
+        // Defensive filter — backend already excludes 0-total types via
+        // HAVING, but this guards against stale/cached responses too.
+        const rows = (res.data.data || []).filter((r: any) => Number(r.total) > 0);
+        setData(rows);
+      })
+      .catch(() => setError("Failed to load customer type data"))
       .finally(() => setLoading(false));
   }, [filters]);
 
@@ -70,12 +75,10 @@ export function AreaChart({ filters }: Props) {
     .map((item) => ({
       ...item,
       total: activeProducts.reduce((sum, key) => sum + (Number(item[key]) || 0), 0),
-      // Tiny (not exactly zero) field used only to anchor the total label at the
-      // top of each stack (see the labelAnchor Bar below). Recharts silently
-      // skips rendering a bar segment — and its LabelList — when its value is
-      // exactly 0, so we use a value small enough to be visually invisible at
-      // chart scale (hundreds/thousands of MT) but still register as "real"
-      // to Recharts so the label reliably renders on every bar.
+      // Tiny (not exactly zero) field used only to anchor the total label at
+      // the top of each stack — see AreaChart.tsx for the full explanation of
+      // why this needs to be non-zero (Recharts skips rendering exact-0 bar
+      // segments, including their LabelList).
       labelAnchor: 0.01,
     }))
     .sort((a, b) => b.total - a.total);
@@ -85,14 +88,13 @@ export function AreaChart({ filters }: Props) {
     const el = chartRef.current;
     const prev = el.style.overflow;
     el.style.overflow = "visible";
-    exportChartToPng(el, "Area-Performance.png").finally(() => {
+    exportChartToPng(el, "Customer-Type-Product-Mix.png").finally(() => {
       el.style.overflow = prev;
     });
   };
 
-  const barWidth = isMobile ? 52 : 68;
+  const barWidth = isMobile ? 60 : 90;
   const chartWidth = Math.max(chartData.length * barWidth + 80, 480);
-  // Extra top margin so tallest bar's label is never clipped
   const topMargin = 48;
   const chartHeight = isMobile ? 300 + topMargin : 360 + topMargin;
 
@@ -101,9 +103,9 @@ export function AreaChart({ filters }: Props) {
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle className="text-base">Area Performance — Product Mix</CardTitle>
+            <CardTitle className="text-base">Product Mix by Customer Type</CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Stacked product volume by area
+              Stacked product volume, grouped by customer type
             </p>
           </div>
           <button
@@ -132,19 +134,16 @@ export function AreaChart({ filters }: Props) {
                   top: topMargin,
                   right: 16,
                   left: 8,
-                  bottom: isMobile ? 72 : 88,
+                  bottom: isMobile ? 40 : 48,
                 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
 
                 <XAxis
-                  dataKey="area"
+                  dataKey="customer_type"
                   fontSize={isMobile ? 8 : 10}
                   stroke="var(--muted-foreground)"
                   interval={0}
-                  angle={-40}
-                  textAnchor="end"
-                  height={isMobile ? 72 : 88}
                   tick={{ fill: "var(--muted-foreground)" }}
                 />
 
@@ -156,10 +155,6 @@ export function AreaChart({ filters }: Props) {
                   tick={{ fill: "var(--muted-foreground)" }}
                 />
 
-                {/* Custom content instead of `formatter` — for a stacked bar,
-                   the payload includes every series at that x position, so
-                   we can list all active products' values in one tooltip
-                   instead of just the single segment under the cursor. */}
                 <Tooltip
                   cursor={{ fill: "var(--muted)", opacity: 0.4 }}
                   content={({ active, payload, label }: any) =>
@@ -185,11 +180,6 @@ export function AreaChart({ filters }: Props) {
                               </span>
                             </div>
                           ))}
-                        {/* Total row — read from the pre-computed `total` field on
-                           each data point (same value the labelAnchor bar labels
-                           at the top of the stack), not summed from payload here,
-                           so it always reflects the full stack regardless of
-                           which individual product segments are 0. */}
                         <div className="flex items-center justify-between gap-4 mt-1.5 pt-1.5 border-t font-semibold">
                           <span>Total</span>
                           <span>{formatNumber(Number(payload[0]?.payload?.total ?? 0))}</span>
@@ -215,25 +205,14 @@ export function AreaChart({ filters }: Props) {
                       stackId="a"
                       fill={getProductColor(product)}
                       radius={isTop ? [4, 4, 0, 0] : [0, 0, 0, 0]}
-                      maxBarSize={56}
+                      maxBarSize={72}
                     />
                   );
                 })}
 
-                {/*
-                  Dedicated near-zero-height bar stacked on top of every real
-                  product segment. Its value (0.01) is negligible at chart scale,
-                  so it adds no visible height, but being non-zero keeps Recharts
-                  from skipping the rect (and therefore the LabelList) the way it
-                  does for exact-0 segments. Recharts still positions it at the
-                  exact top of the stack for every row — including rows where the
-                  "last" product (e.g. Holcim Coastal Guard) happens to be 0 and
-                  wouldn't otherwise render anything to hang a label on. This
-                  guarantees the total label is always visible above every bar
-                  (not just on hover, and not just on the one row where the
-                  top-most product happens to be non-zero) — which matters for
-                  the PNG export, where hovering isn't possible.
-                */}
+                {/* See AreaChart.tsx for full explanation: a near-zero (not
+                   exactly 0) anchor bar keeps Recharts from skipping the total
+                   label on rows where the topmost product happens to be 0. */}
                 <Bar
                   dataKey="labelAnchor"
                   stackId="a"

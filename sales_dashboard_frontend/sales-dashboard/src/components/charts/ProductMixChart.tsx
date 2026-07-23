@@ -13,20 +13,7 @@ import { formatNumber } from "../../lib/formatNumber";
 import { ImageDown } from "lucide-react";
 import { exportChartToPng } from "../../lib/exportPng";
 import type { FilterParams } from "../../api/salesApi";
-
-const COLORS = [
-  "#3b82f6","#10b981","#f59e0b","#ef4444",
-  "#8b5cf6","#06b6d4",
-];
-
-// getByProduct returns each row's `name` as the short code (PLC, PLC+, ...).
-// Only these three get relabeled; anything not listed here (Powercrete, HWP,
-// HCG) falls through to its original short code via the `|| value` fallback.
-const PRODUCT_LABELS: Record<string, string> = {
-  "PLC": "Supercrete",
-  "PLC+": "Supercrete +",
-  "PCC + OPC": "Holcim",
-};
+import { getProductColor, getProductLabel } from "../../lib/products";
 
 interface Props {
   filters: FilterParams;
@@ -49,8 +36,8 @@ export function ProductMixChart({ filters }: Props) {
   }, [filters]);
 
   const exportPng = () => {
-  exportChartToPng(chartRef.current, "Product-Mix.png");
-};
+    exportChartToPng(chartRef.current, "Product-Mix.png");
+  };
 
   return (
     <Card>
@@ -91,20 +78,19 @@ export function ProductMixChart({ filters }: Props) {
                   outerRadius={100}
                   paddingAngle={3}
                   label={({ name, percent }: any) =>
-                    `${PRODUCT_LABELS[name] || name} (${((percent ?? 0) * 100).toFixed(1)}%)`
+                    `${getProductLabel(name) || name} (${((percent ?? 0) * 100).toFixed(1)}%)`
                   }
                 >
-                  {data.map((_: any, i: number) => (
-                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                  {data.map((d: any, i: number) => (
+                    <Cell key={i} fill={getProductColor(d.name)} />
                   ))}
-
                 </Pie>
                 <Tooltip
                   content={({ active, payload }: any) =>
                     active && payload?.length ? (
                       <div className="rounded-lg border bg-popover px-3 py-2 text-xs shadow-lg">
                         <div className="font-semibold">
-                          {PRODUCT_LABELS[payload[0].name] || payload[0].name}
+                          {getProductLabel(payload[0].name) || payload[0].name}
                         </div>
                         <div>{formatNumber(payload[0].value)}</div>
                         <div className="text-muted-foreground">
@@ -116,7 +102,7 @@ export function ProductMixChart({ filters }: Props) {
                 />
                 <Legend
                   formatter={(value) => (
-                    <span className="text-xs">{PRODUCT_LABELS[value] || value}</span>
+                    <span className="text-xs">{getProductLabel(value) || value}</span>
                   )}
                 />
               </PieChart>

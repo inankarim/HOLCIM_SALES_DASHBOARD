@@ -20,7 +20,7 @@ import {
   PRODUCT_DATA_KEYS,
   getProductColor,
   getProductLabel,
-} from "../../lib/products";
+} from "../config/products";
 
 const ALL_PRODUCT_KEYS = PRODUCT_CODES.map((code) => PRODUCT_DATA_KEYS[code]);
 

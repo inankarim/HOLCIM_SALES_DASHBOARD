@@ -5,7 +5,7 @@ import { formatNumber } from "../../lib/formatNumber";
 import { ImageDown } from "lucide-react";
 import type { FilterParams } from "../../api/salesApi";
 import { exportChartToPng } from "../../lib/exportPng";
-import { PRODUCT_CODES, PRODUCT_DATA_KEYS, PRODUCT_LABELS, PRODUCT_COLORS } from "../../lib/products";
+import { PRODUCT_CODES, PRODUCT_DATA_KEYS, PRODUCT_LABELS, PRODUCT_COLORS } from "../config/products";
 
 interface Props {
   filters: FilterParams;

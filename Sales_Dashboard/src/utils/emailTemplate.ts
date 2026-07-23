@@ -29,9 +29,9 @@ export function buildDashboardEmail(data: {
     const abs = Math.abs(value);
 
     if (abs >= 1000000) {
-      return (value / 1000000).toFixed(2) + "M MT";
+      return (value / 1000000).toFixed(2) + "MMT";
     } else if (abs >= 1000) {
-      return (value / 1000).toFixed(2) + "K MT";
+      return (value / 1000).toFixed(2) + "KT";
     } else {
       return Math.round(value).toLocaleString() + " MT";
     }
