@@ -127,7 +127,8 @@ EXCLUDED_KEYWORDS: list[str] = [
     "e-commerce",
     "Non Trade_LIP",
     "Non Trade_Export",
-    "Business Closed"
+    "Business Closed",
+    "KAM-Vacant"
     # "modern trade",
     # "test account",
 ]

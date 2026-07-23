@@ -7,7 +7,7 @@
 export const PRODUCT_COLORS = {
   PLC: "#008037", // Supercrete
   "PLC+": "#d01e2799", // Supercrete Plus
-  POW: "", // Powercrete
+  POW: "#e2e60d99", // Powercrete
   HOLCIM: "#ef060e", // Holcim (PCC + OPC)
   HWP: "#1E3C72", // Holcim Water Protect
   HCG: "#0090C8", // Holcim Coastal Guard
