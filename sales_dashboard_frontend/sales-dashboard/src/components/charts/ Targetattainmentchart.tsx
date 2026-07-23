@@ -37,20 +37,30 @@ const YESTERDAY_COLOR = "#f59e0b";
 const PRODUCT_LABELS: Record<string, string> = {
   plc_mtd_sales: "Supercrete",
   plc_plus_mtd_sales: "Supercrete Plus",
-  powercrete_mtd_sales: "POW",
+  powercrete_mtd_sales: "Powecreate",
   pcc_opc_mtd_sales: "Holcim",
   hwp_mtd_sales: "Holcim Water Protect",
   hcg_mtd_sales: "Holcim Coastal Guard",
 };
 
+// Maps every short code / display name the backend sends (via `key` or
+// `name`) to the internal *_mtd_sales column. Keys are normalized
+// (trimmed, lowercased, whitespace-collapsed) before lookup, so casing
+// and spacing differences ("PCC + OPC" vs "pcc+opc" vs " PCC   +  OPC ")
+// all resolve the same way. Backend sends BOTH short codes (e.g. "plc")
+// and long display names (e.g. "PCC + OPC", "Powercrete") depending on
+// endpoint, so both forms are included here.
 const PRODUCT_KEY_MAP: Record<string, string> = {
-  "PLC": "plc_mtd_sales",
-  "PLC+": "plc_plus_mtd_sales",
-  "POW": "powercrete_mtd_sales",
-  "Holcim": "pcc_opc_mtd_sales",
-  "PCC + OPC": "pcc_opc_mtd_sales",
-  "HWP": "hwp_mtd_sales",
-  "HCG": "hcg_mtd_sales",
+  plc: "plc_mtd_sales",
+  "plc+": "plc_plus_mtd_sales",
+  plc_plus: "plc_plus_mtd_sales",
+  pow: "powercrete_mtd_sales",
+  powercrete: "powercrete_mtd_sales",
+  holcim: "pcc_opc_mtd_sales",
+  "pcc + opc": "pcc_opc_mtd_sales",
+  pcc_opc: "pcc_opc_mtd_sales",
+  hwp: "hwp_mtd_sales",
+  hcg: "hcg_mtd_sales",
 };
 
 const COLORS: Record<string, string> = {
@@ -62,14 +72,21 @@ const COLORS: Record<string, string> = {
   hcg_mtd_sales: "#ef4444",
 };
 
+function normalize(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 function resolveProduct(rawKey: string, rawName: string) {
   // Try the key as-is first (covers the case where `key` is already
   // the internal column name, e.g. "plc_mtd_sales").
   const directKey = PRODUCT_LABELS[rawKey] ? rawKey : undefined;
 
-  // Otherwise fall back to mapping the short code (`name`, e.g. "PLC")
-  // through PRODUCT_KEY_MAP to get the internal key.
-  const mappedKey = directKey ?? PRODUCT_KEY_MAP[rawName] ?? PRODUCT_KEY_MAP[rawKey];
+  // Otherwise fall back to mapping the short code / display name
+  // (normalized) through PRODUCT_KEY_MAP to get the internal key.
+  const mappedKey =
+    directKey ??
+    PRODUCT_KEY_MAP[normalize(rawName ?? "")] ??
+    PRODUCT_KEY_MAP[normalize(rawKey ?? "")];
 
   const finalKey = directKey ?? mappedKey;
 
@@ -105,9 +122,9 @@ export function TargetAttainmentChart({ filters }: Props) {
         const yestData = yestRes.data?.data || [];
 
         // yesterday response is keyed by product name only (no `key`),
-        // so index it by name to merge onto the mtd rows.
+        // so index it by normalized name to merge onto the mtd rows.
         const yestByName = new Map(
-          yestData.map((p: any) => [p.name, Number(p.value) || 0]),
+          yestData.map((p: any) => [normalize(p.name ?? ""), Number(p.value) || 0]),
         );
 
         const merged: ProductRow[] = mtdData.map((p: any) => {
@@ -118,7 +135,7 @@ export function TargetAttainmentChart({ filters }: Props) {
             color,
             target: Number(p.target) || 0,
             mtd: Number(p.mtd_sales) || 0,
-            yesterday: yestByName.get(p.name) ?? 0,
+            yesterday: yestByName.get(normalize(p.name ?? "")) ?? 0,
           };
         });
 
