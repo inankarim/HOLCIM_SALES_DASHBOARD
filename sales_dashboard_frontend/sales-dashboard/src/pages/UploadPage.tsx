@@ -160,6 +160,14 @@ export function UploadPage() {
 
   const today = new Date().toISOString().slice(0, 10);
 
+  // Hard ceiling for the date picker: user can pick yesterday or earlier,
+  // but never today or any future date.
+  const maxSelectableDate = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().slice(0, 10);
+  })();
+
   const isRateLimited = (): boolean => {
     const now = Date.now();
     if (now - lastSubmitTime.current < 60000) {
@@ -227,8 +235,8 @@ export function UploadPage() {
       return;
     }
 
-    if (cleanDate > today) {
-      setError("Upload date cannot be in the future.");
+    if (cleanDate >= today) {
+      setError("Upload date must be before today.");
       return;
     }
 
@@ -317,7 +325,7 @@ export function UploadPage() {
               <Input
                 id="upload-date"
                 type="date"
-                max={today}
+                max={maxSelectableDate}
                 min={(() => {
                   const d = new Date();
                   d.setFullYear(d.getFullYear() - 5);
