@@ -169,6 +169,31 @@ export function EmailChartModal({ open, onClose, onEmailSent, filters }: Props) 
     setCcError(clean && !isValidEmail(clean) ? "Invalid CC email address" : "");
   };
 
+  // ── Saved recipients: select all / delete ─────────────────────────────────
+
+  const addAllSavedRecipients = () => {
+    setToList((prev) => {
+      const merged = [...prev];
+      for (const r of savedRecipients) {
+        if (!merged.includes(r.email)) merged.push(r.email);
+      }
+      return merged;
+    });
+  };
+
+  const allSavedAlreadyAdded =
+    savedRecipients.length > 0 &&
+    savedRecipients.every((r) => toList.includes(r.email));
+
+  const deleteSavedRecipient = async (id: number) => {
+    try {
+      await salesApi.deleteEmailRecipient(id);
+      setSavedRecipients((prev) => prev.filter((x) => x.id !== id));
+    } catch (err) {
+      console.error("Failed to delete recipient", err);
+    }
+  };
+
   // ── Chart state helper ────────────────────────────────────────────────────
 
   const setChartStatus = (label: JobLabel, s: ChartStatus) => {
@@ -260,10 +285,15 @@ export function EmailChartModal({ open, onClose, onEmailSent, filters }: Props) 
       setProgressMsg("Email sent successfully!");
       setStatus("done");
 
-      // Save recipients if checkbox was checked — fire and forget
-      if (saveThisEmail && toList.length > 0) {
+      // Save recipients if checkbox was checked — fire and forget.
+      // Covers both To and CC addresses.
+      if (saveThisEmail) {
+        const toSave = [...toList];
+        if (ccEmail && isValidEmail(ccEmail) && !toSave.includes(ccEmail)) {
+          toSave.push(ccEmail);
+        }
         Promise.all(
-          toList.map((email) =>
+          toSave.map((email) =>
             salesApi.addEmailRecipient(email).catch((err) =>
               console.error("Failed to save recipient", email, err)
             )
@@ -357,15 +387,25 @@ export function EmailChartModal({ open, onClose, onEmailSent, filters }: Props) 
               )}
             </div>
 
-            {/* Saved recipients quick-select */}
+            {/* Saved recipients quick-select (To) */}
             {!recipientsLoading && savedRecipients.length > 0 && (
               <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Saved Recipients</Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-muted-foreground">Saved Recipients</Label>
+                  <button
+                    type="button"
+                    disabled={isBusy || allSavedAlreadyAdded}
+                    onClick={addAllSavedRecipients}
+                    className="text-xs font-medium text-primary hover:underline disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                  >
+                    {allSavedAlreadyAdded ? "All added" : "Select all"}
+                  </button>
+                </div>
                 <div className="flex flex-wrap gap-1.5">
                   {savedRecipients.map((r) => (
                     <div
                       key={r.id}
-                      className="group flex items-center gap-1 rounded-full border bg-muted/40 pl-2.5 pr-1 py-1 text-xs"
+                      className="flex items-center gap-1 rounded-full border bg-muted/40 pl-2.5 pr-1 py-1 text-xs"
                     >
                       <button
                         type="button"
@@ -382,15 +422,8 @@ export function EmailChartModal({ open, onClose, onEmailSent, filters }: Props) 
                       <button
                         type="button"
                         disabled={isBusy}
-                        onClick={async () => {
-                          try {
-                            await salesApi.deleteEmailRecipient(r.id);
-                            setSavedRecipients((prev) => prev.filter((x) => x.id !== r.id));
-                          } catch (err) {
-                            console.error("Failed to delete recipient", err);
-                          }
-                        }}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity rounded-full hover:bg-destructive/10 p-0.5"
+                        onClick={() => deleteSavedRecipient(r.id)}
+                        className="rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 p-0.5"
                         title="Remove saved recipient"
                       >
                         ×
@@ -416,10 +449,31 @@ export function EmailChartModal({ open, onClose, onEmailSent, filters }: Props) 
               {ccError && (
                 <p className="text-xs text-destructive">{ccError}</p>
               )}
+
+              {/* Saved recipients quick-select (CC) */}
+              {!recipientsLoading && savedRecipients.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {savedRecipients.map((r) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      disabled={isBusy}
+                      onClick={() => validateCc(r.email)}
+                      className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                        ccEmail === r.email
+                          ? "bg-primary/10 border-primary/40 text-primary"
+                          : "bg-muted/40 hover:text-primary"
+                      }`}
+                    >
+                      {r.label || r.email}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Save recipients checkbox */}
-            {toList.length > 0 && (
+            {(toList.length > 0 || (ccEmail && !ccError)) && (
               <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
                 <input
                   type="checkbox"

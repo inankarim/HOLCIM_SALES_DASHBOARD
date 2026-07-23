@@ -24,6 +24,7 @@ interface Props {
 interface ProductRow {
   key: string;
   label: string;
+  color: string;
   target: number;
   mtd: number;
   yesterday: number;
@@ -32,6 +33,51 @@ interface ProductRow {
 const TARGET_COLOR = "#cbd5e1";
 const MTD_COLOR = "#2563eb";
 const YESTERDAY_COLOR = "#f59e0b";
+
+const PRODUCT_LABELS: Record<string, string> = {
+  plc_mtd_sales: "Supercrete",
+  plc_plus_mtd_sales: "Supercrete Plus",
+  powercrete_mtd_sales: "POW",
+  pcc_opc_mtd_sales: "Holcim",
+  hwp_mtd_sales: "Holcim Water Protect",
+  hcg_mtd_sales: "Holcim Coastal Guard",
+};
+
+const PRODUCT_KEY_MAP: Record<string, string> = {
+  "PLC": "plc_mtd_sales",
+  "PLC+": "plc_plus_mtd_sales",
+  "POW": "powercrete_mtd_sales",
+  "Holcim": "pcc_opc_mtd_sales",
+  "PCC + OPC": "pcc_opc_mtd_sales",
+  "HWP": "hwp_mtd_sales",
+  "HCG": "hcg_mtd_sales",
+};
+
+const COLORS: Record<string, string> = {
+  plc_mtd_sales: "#3b82f6",
+  plc_plus_mtd_sales: "#10b981",
+  powercrete_mtd_sales: "#f59e0b",
+  pcc_opc_mtd_sales: "#ec4899",
+  hwp_mtd_sales: "#22c55e",
+  hcg_mtd_sales: "#ef4444",
+};
+
+function resolveProduct(rawKey: string, rawName: string) {
+  // Try the key as-is first (covers the case where `key` is already
+  // the internal column name, e.g. "plc_mtd_sales").
+  const directKey = PRODUCT_LABELS[rawKey] ? rawKey : undefined;
+
+  // Otherwise fall back to mapping the short code (`name`, e.g. "PLC")
+  // through PRODUCT_KEY_MAP to get the internal key.
+  const mappedKey = directKey ?? PRODUCT_KEY_MAP[rawName] ?? PRODUCT_KEY_MAP[rawKey];
+
+  const finalKey = directKey ?? mappedKey;
+
+  return {
+    label: (finalKey && PRODUCT_LABELS[finalKey]) ?? rawName,
+    color: (finalKey && COLORS[finalKey]) ?? "#94a3b8",
+  };
+}
 
 export function TargetAttainmentChart({ filters }: Props) {
   const [rows, setRows] = useState<ProductRow[]>([]);
@@ -64,13 +110,17 @@ export function TargetAttainmentChart({ filters }: Props) {
           yestData.map((p: any) => [p.name, Number(p.value) || 0]),
         );
 
-        const merged: ProductRow[] = mtdData.map((p: any) => ({
-          key: p.key,
-          label: p.name,
-          target: Number(p.target) || 0,
-          mtd: Number(p.mtd_sales) || 0,
-          yesterday: yestByName.get(p.name) ?? 0,
-        }));
+        const merged: ProductRow[] = mtdData.map((p: any) => {
+          const { label, color } = resolveProduct(p.key, p.name);
+          return {
+            key: p.key,
+            label,
+            color,
+            target: Number(p.target) || 0,
+            mtd: Number(p.mtd_sales) || 0,
+            yesterday: yestByName.get(p.name) ?? 0,
+          };
+        });
 
         setRows(merged);
       })

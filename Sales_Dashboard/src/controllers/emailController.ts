@@ -120,6 +120,11 @@ export const sendDashboardEmail = async (
       // Insights
       // Always the true daily sales total — sum *_yesterday, never
       // *_mtd_sales (that's a cumulative snapshot, not a per-day figure).
+      //
+      // lowest_customer / lowest_customer_value: excludes customers whose
+      // total for the date is exactly 0 via HAVING, so a customer with no
+      // activity that day never gets surfaced as the "lowest" performer —
+      // the next-lowest customer with actual (non-zero) sales is picked instead.
       pool.query(
         `
         SELECT
@@ -140,9 +145,13 @@ export const sendDashboardEmail = async (
           (SELECT SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) FROM sales_current WHERE upload_date = $1
             GROUP BY customer_name ORDER BY SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) DESC LIMIT 1) AS top_customer_value,
           (SELECT customer_name FROM sales_current WHERE upload_date = $1
-            GROUP BY customer_name ORDER BY SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) ASC LIMIT 1) AS lowest_customer,
+            GROUP BY customer_name
+            HAVING SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) <> 0
+            ORDER BY SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) ASC LIMIT 1) AS lowest_customer,
           (SELECT SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) FROM sales_current WHERE upload_date = $1
-            GROUP BY customer_name ORDER BY SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) ASC LIMIT 1) AS lowest_customer_value
+            GROUP BY customer_name
+            HAVING SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) <> 0
+            ORDER BY SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) ASC LIMIT 1) AS lowest_customer_value
       `,
         [date],
       ),

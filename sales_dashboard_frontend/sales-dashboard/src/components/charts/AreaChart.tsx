@@ -29,7 +29,7 @@ const PRODUCT_LABELS: Record<string, string> = {
   plc_mtd_sales: "Supercrete",
   plc_plus_mtd_sales: "Supercrete Plus",
   powercrete_mtd_sales: "POW",
-  pcc_opc_mtd_sales: "Holcim Strong Structure",
+  pcc_opc_mtd_sales: "Holcim",
   hwp_mtd_sales: "Holcim Water Protect",
   hcg_mtd_sales: "Holcim Coastal Guard",
 };

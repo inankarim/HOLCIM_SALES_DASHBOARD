@@ -25,7 +25,7 @@ const PRODUCT_KEY_MAP: Record<string, string> = {
   "PLC": "plc_mtd_sales",
   "PLC+": "plc_plus_mtd_sales",
   "POW": "powercrete_mtd_sales",
-  "Holcim SS": "pcc_opc_mtd_sales",
+  "Holcim": "pcc_opc_mtd_sales",
   "HWP": "hwp_mtd_sales",
   "HCG": "hcg_mtd_sales",
 };
@@ -34,7 +34,7 @@ const PRODUCT_LABELS: Record<string, string> = {
   "PLC": "Supercrete",
   "PLC+": "Supercrete Plus",
   "POW": "POW",
-  "Holcim SS": "Holcim Strong Structure",
+  "Holcim": "Holcim",
   "HWP": "Holcim Water Protect",
   "HCG": "Holcim Coastal Guard",
 };
