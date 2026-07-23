@@ -3,7 +3,7 @@ import { KpiRow } from "../components/shared/kpiRow";
 import { RegionChart } from "../components/charts/RegionChart";
 import { ProductMixChart } from "../components/charts/ProductMixChart";
 import { ProductComparisonChart } from "../components/charts/ProductComparisonChart";
-import { TargetAttainmentChart } from "../components/charts/ Targetattainmentchart";
+import { TargetAttainmentChart } from "../components/charts/Targetattainmentchart";
 import { HeatmapChart } from "../components/charts/HeatmapChart";
 import { AreaChart } from "../components/charts/AreaChart";
 import { TerritoryChart } from "../components/charts/TerritoryChart";
@@ -13,7 +13,7 @@ import { InsightsPanel } from "../components/shared/InsightsPanel";
 import { DeepInsightsPage } from "./DeepInsightsPage";
 import { EmailChartModal } from "../components/shared/EmailChartModal";
 import { Button } from "../components/ui/button";
-import { CustomerTypeSalesChart } from "../components/charts/ Customertypesaleschart"; // adjust path to match actual location
+import { CustomerTypeSalesChart } from "../components/charts/Customertypesaleschart"; // adjust path to match actual location
 import { ArrowLeft, BarChart2, Layers, ImageDown } from "lucide-react";
 
 import type { FilterParams } from "../api/salesApi";

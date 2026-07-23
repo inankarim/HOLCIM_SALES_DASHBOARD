@@ -2,14 +2,14 @@ import { KpiRow } from "../components/shared/kpiRow";
 import { RegionChart } from "../components/charts/RegionChart";
 import { ProductMixChart } from "../components/charts/ProductMixChart";
 import { ProductComparisonChart } from "../components/charts/ProductComparisonChart";
-import { TargetAttainmentChart } from "../components/charts/ Targetattainmentchart";
+import { TargetAttainmentChart } from "../components/charts/Targetattainmentchart";
 import { HeatmapChart } from "../components/charts/HeatmapChart";
 import { AreaChart } from "../components/charts/AreaChart";
 import { TerritoryChart } from "../components/charts/TerritoryChart";
 import { TreemapChart } from "../components/charts/TreemapChart";
 import { CustomerChart } from "../components/charts/CustomerChart";
 import { InsightsPanel } from "../components/shared/InsightsPanel";
-import { CustomerTypeSalesChart } from "../components/charts/ Customertypesaleschart";
+import { CustomerTypeSalesChart } from "../components/charts/Customertypesaleschart";
 import { CustomerTypeProductChart } from "../components/charts/Customertypeproductchart";
 
 import type { FilterParams } from "../api/salesApi";
