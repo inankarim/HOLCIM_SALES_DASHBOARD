@@ -21,6 +21,25 @@ export interface EmailRecipient {
   created_at: string
 }
 
+export interface RsmRegionRow {
+  region: string
+  rsm: string
+  target: number
+  mtd_target: number
+  mtd_sales: number
+  ach_mtd: number
+  todays_sales: number
+  ach_today: number
+  per_day_req: number
+  reg_per_day: number
+}
+
+export interface RsmRegionProductTable {
+  product: string
+  colorKey: string
+  rows: RsmRegionRow[]
+}
+
 export const salesApi = {
   // ── Auth ────────────────────────────────────────────────────────────────────
 
@@ -100,6 +119,19 @@ export const salesApi = {
   //            hwp_mtd_sales, hcg_mtd_sales, total }] }
   getByTerritory: (params: FilterParams) =>
     http.get("/api/sales/by-territory", { params }),
+
+  // GET /api/sales/rsm-region-report → getRsmRegionReport
+  // Product-wise Target / MTD Target / MTD Sales, grouped by Region + RSM.
+  // Returns: { date_used, data: RsmRegionProductTable[] }
+  // data has 7 entries: Supercrete, Supercrete+, Powercrete,
+  // Holcim (PCC+OPC), HWP, HCG (each customer_type != 'D2R'), plus a
+  // combined "D2R" entry (all 6 products summed together per region/RSM).
+  // Optional ?region= filter narrows to a single region.
+  getRsmRegionReport: (params: FilterParams) =>
+    http.get<{ date_used: string | null; data: RsmRegionProductTable[] }>(
+      "/api/sales/rsm-region-report",
+      { params }
+    ),
 
   // GET /api/sales/customers → getCustomers
   // Returns: { date_used, total_customers, grand_total, top5, bottom5,

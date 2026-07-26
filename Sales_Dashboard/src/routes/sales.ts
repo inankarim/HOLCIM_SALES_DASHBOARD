@@ -19,6 +19,7 @@ import {
   getYesterdayByTerritory,
   getYesterdayCustomers,
   getByCustomerType,
+  getRsmRegionReport,
 } from "../controllers/salesController";
 
 const router = Router();
@@ -40,6 +41,7 @@ router.get("/sales/by-product", getByProduct);
 router.get("/sales/mtd-target-by-product", getMtdTargetByProduct);
 router.get("/sales/region-product-heatmap", getRegionProductHeatmap);
 router.get("/sales/by-area", getByArea);
+router.get("/sales/rsm-region-report", getRsmRegionReport);
 router.get("/sales/by-territory", getByTerritory);
 router.get("/sales/by-customer-type", getByCustomerType);
 

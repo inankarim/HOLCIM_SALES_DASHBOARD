@@ -26,9 +26,10 @@ import {
   Shield,
   Zap,
   ImageDown,
+  Target,
 } from "lucide-react";
 import { exportChartToPng } from "../lib/exportPng";
-import type { FilterParams } from "../api/salesApi";
+import type { FilterParams, RsmRegionProductTable } from "../api/salesApi";
 
 const COLORS = [
   "#3b82f6","#10b981","#f59e0b","#ef4444",
@@ -85,10 +86,36 @@ function DataTable({ columns, rows }: {
   );
 }
 
+// Columns shared by every RSM/Region product table.
+const RSM_REGION_COLUMNS = [
+  { key: "region", label: "Region" },
+  { key: "rsm", label: "RSM" },
+  { key: "target", label: "Target", format: formatNumber },
+  { key: "mtd_target", label: "MTD Target", format: formatNumber },
+  { key: "mtd_sales", label: "MTD Sales", format: formatNumber },
+  {
+    key: "ach_mtd",
+    label: "Ach % (MTD)",
+    format: (v: number) => `${(v * 100).toFixed(1)}%`,
+  },
+  { key: "todays_sales", label: "Today's Sales", format: formatNumber },
+  {
+    key: "ach_today",
+    label: "Ach % (Today)",
+    format: (v: number) => `${(v * 100).toFixed(1)}%`,
+  },
+  { key: "per_day_req", label: "Per Day Req", format: formatNumber },
+  { key: "reg_per_day", label: "Reg/Day", format: formatNumber },
+];
+
 export function DeepInsightsPage({ filters }: Props) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [rsmData, setRsmData] = useState<RsmRegionProductTable[] | null>(null);
+  const [rsmLoading, setRsmLoading] = useState(true);
+  const [rsmError, setRsmError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -98,6 +125,16 @@ export function DeepInsightsPage({ filters }: Props) {
       .then((res) => setData(res.data))
       .catch(() => setError("Failed to load deep insights"))
       .finally(() => setLoading(false));
+  }, [filters]);
+
+  useEffect(() => {
+    setRsmLoading(true);
+    setRsmError(null);
+    salesApi
+      .getRsmRegionReport(filters)
+      .then((res) => setRsmData(res.data.data))
+      .catch(() => setRsmError("Failed to load RSM/Region report"))
+      .finally(() => setRsmLoading(false));
   }, [filters]);
 
   const exportTablePng = (id: string, filename: string) => {
@@ -385,6 +422,54 @@ export function DeepInsightsPage({ filters }: Props) {
 
           <div className="border-t" />
 
+                {/* ── RSM / REGION — TARGET vs MTD TARGET (PRODUCT-WISE) ── */}
+      <Card>
+        <CardHeader>
+          <SectionTitle icon={Target} title="RSM / Region — Target vs MTD Target" color="text-purple-500" />
+        </CardHeader>
+        <CardContent className="space-y-8">
+          {rsmLoading && (
+            <div className="space-y-4">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-32 animate-pulse rounded-xl bg-muted" />
+              ))}
+            </div>
+          )}
+
+          {rsmError && (
+            <p className="text-xs text-destructive py-2">{rsmError}</p>
+          )}
+
+          {!rsmLoading && !rsmError && rsmData && rsmData.map((table) => (
+            <div key={table.product}>
+              <div
+                id={`chart-rsm-region-${table.colorKey}`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold">{table.product} — RSM / Region</h3>
+                  <button
+                    onClick={() =>
+                      exportTablePng(
+                        `chart-rsm-region-${table.colorKey}`,
+                        `RSM-Region-${table.product}.png`,
+                      )
+                    }
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    <ImageDown className="h-3 w-3" /> PNG
+                  </button>
+                </div>
+                <DataTable columns={RSM_REGION_COLUMNS} rows={table.rows} />
+              </div>
+              {table !== rsmData[rsmData.length - 1] && (
+                <div className="border-t mt-8" />
+              )}
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+       <div className="border-t" />
+
           {/* Vacant TSM Territories */}
           <div id="chart-vacant-tsm">
             <div className="flex items-center justify-between mb-2">
@@ -656,6 +741,9 @@ export function DeepInsightsPage({ filters }: Props) {
           </div>
         </CardContent>
       </Card>
+
+
+     
     </div>
   );
 }

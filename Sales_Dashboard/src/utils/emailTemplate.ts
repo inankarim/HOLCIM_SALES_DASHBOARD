@@ -7,6 +7,7 @@ export function buildDashboardEmail(data: {
   deepInsights: any;
   mtdTarget?: any;
   allAreas?: any[];
+  rsmByProduct?: { product: string; colorKey?: string; rows: any[] }[];
   charts?: { name: string; base64: string }[];
   dashboardUrl?: string;
 }): string {
@@ -19,6 +20,7 @@ export function buildDashboardEmail(data: {
     deepInsights,
     mtdTarget,
     allAreas = [],
+    rsmByProduct = [],
     charts = [],
     dashboardUrl,
   } = data;
@@ -54,12 +56,12 @@ export function buildDashboardEmail(data: {
    *   so it doesn't look blown up.
    * - `touch-action: pan-x pinch-zoom` lets people pinch-to-zoom on mobile
    *   without fighting the scroll container.
-   * - DESKTOP FIX: `.chart-img--wide` now scales to fit the card on
-   *   desktop (width:100%/max-width:100%) instead of forcing native
-   *   pixel width. The old "wide" (min-width:100%, max-width:none)
-   *   behavior only kicks back in inside a mobile-only media query,
-   *   so phones keep the pinch/scroll UX while desktop no longer
-   *   shows an oversized/clipped chart.
+   * - DESKTOP: `.chart-img--wide` scales to fit the card on desktop
+   *   (width:100%/max-width:100%) instead of forcing native pixel width.
+   *   The "wide" (min-width:640px, max-width:none) behavior only kicks
+   *   in inside a mobile-only media query, so phones keep the
+   *   pinch/scroll UX while desktop never shows an oversized/clipped
+   *   chart.
    */
   const renderChart = (
     chart: { name: string; base64: string } | undefined,
@@ -83,19 +85,39 @@ export function buildDashboardEmail(data: {
     </div>`;
   };
 
+  // ────────────────────────────────────────────────────────────────
+  // NOTE ON THE CLASSES USED BELOW (.dt / .dts / .l / .r / .c / .total)
+  // These replace what used to be a full inline `style="..."` on every
+  // single <td>/<th>. With tables this size (500+ cells across the
+  // email), that repetition alone was ~50-70KB of HTML — comfortably
+  // enough on its own to push the message over Gmail's ~102KB clip
+  // threshold, which is what breaks responsiveness (the "View entire
+  // message" render ignores the <style> block's media queries).
+  // Definitions live in the <style> block further down:
+  //   .dt   → standard data table (Region/Product/Area/MTD/RSM tables)
+  //   .dts  → smaller insight tables (Bottom Performers / Top Customers)
+  //   .l/.r/.c → text-align left/right/center
+  //   .total   → bold + brand-blue for grand-total columns
+  //   .dts.bad / .dts.good → red/green theming for the small tables
+  // Anything that's genuinely per-row/per-value (striped row background,
+  // achievement % color) still uses inline style, since a class can't
+  // express a computed value — but that's a handful of bytes per row,
+  // not per cell.
+  // ────────────────────────────────────────────────────────────────
+
   const regionRows = byRegion
     .sort((a, b) => b.total - a.total)
     .map(
       (r, i) => `
       <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"}">
-        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;white-space:nowrap">${r.region}</td>
-        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${formatNum(r.plc)}</td>
-        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${formatNum(r.plc_plus)}</td>
-        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${formatNum(r.pow)}</td>
-        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${formatNum(r.holcim_ss)}</td>
-        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${formatNum(r.hwp)}</td>
-        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${formatNum(r.hcg)}</td>
-        <td style="padding:10px 14px;font-size:13px;font-weight:700;color:#1d4370;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${formatNum(r.total)}</td>
+        <td>${r.region}</td>
+        <td class="r">${formatNum(r.plc)}</td>
+        <td class="r">${formatNum(r.plc_plus)}</td>
+        <td class="r">${formatNum(r.pow)}</td>
+        <td class="r">${formatNum(r.holcim_ss)}</td>
+        <td class="r">${formatNum(r.hwp)}</td>
+        <td class="r">${formatNum(r.hcg)}</td>
+        <td class="r total">${formatNum(r.total)}</td>
       </tr>`,
     )
     .join("");
@@ -105,9 +127,9 @@ export function buildDashboardEmail(data: {
     .map(
       (p, i) => `
       <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"}">
-        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;white-space:nowrap">${p.name}</td>
-        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${formatNum(p.value)}</td>
-        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${p.pct?.toFixed(1)}%</td>
+        <td>${p.name}</td>
+        <td class="r">${formatNum(p.value)}</td>
+        <td class="r">${p.pct?.toFixed(1)}%</td>
       </tr>`,
     )
     .join("");
@@ -115,10 +137,10 @@ export function buildDashboardEmail(data: {
   const bottom5TsmRows = (deepInsights?.failures?.bottom5_tsm_tse || [])
     .map(
       (r: any, i: number) => `
-      <tr style="background:${i % 2 === 0 ? "#fff5f5" : "#ffffff"}">
-        <td style="padding:8px 12px;font-size:12px;color:#1e293b;border-bottom:1px solid #fee2e2">${r.tsm_tse}</td>
-        <td style="padding:8px 12px;font-size:12px;color:#1e293b;border-bottom:1px solid #fee2e2;text-align:center">${r.customers}</td>
-        <td style="padding:8px 12px;font-size:12px;color:#dc2626;font-weight:700;border-bottom:1px solid #fee2e2;text-align:right">${formatNum(Number(r.total))}</td>
+      <tr class="dts bad" style="background:${i % 2 === 0 ? "#fff5f5" : "#ffffff"}">
+        <td>${r.tsm_tse}</td>
+        <td class="c">${r.customers}</td>
+        <td class="r total">${formatNum(Number(r.total))}</td>
       </tr>`,
     )
     .join("");
@@ -126,10 +148,10 @@ export function buildDashboardEmail(data: {
   const bottom5AsmRows = (deepInsights?.failures?.bottom5_asm_kam || [])
     .map(
       (r: any, i: number) => `
-      <tr style="background:${i % 2 === 0 ? "#fff5f5" : "#ffffff"}">
-        <td style="padding:8px 12px;font-size:12px;color:#1e293b;border-bottom:1px solid #fee2e2">${r.asm_kam}</td>
-        <td style="padding:8px 12px;font-size:12px;color:#1e293b;border-bottom:1px solid #fee2e2;text-align:center">${r.customers}</td>
-        <td style="padding:8px 12px;font-size:12px;color:#dc2626;font-weight:700;border-bottom:1px solid #fee2e2;text-align:right">${formatNum(Number(r.total))}</td>
+      <tr class="dts bad" style="background:${i % 2 === 0 ? "#fff5f5" : "#ffffff"}">
+        <td>${r.asm_kam}</td>
+        <td class="c">${r.customers}</td>
+        <td class="r total">${formatNum(Number(r.total))}</td>
       </tr>`,
     )
     .join("");
@@ -137,11 +159,11 @@ export function buildDashboardEmail(data: {
   const bottom5TerRows = (deepInsights?.failures?.bottom5_territories || [])
     .map(
       (r: any, i: number) => `
-      <tr style="background:${i % 2 === 0 ? "#fff5f5" : "#ffffff"}">
-        <td style="padding:8px 12px;font-size:12px;color:#1e293b;border-bottom:1px solid #fee2e2">${r.territory}</td>
-        <td style="padding:8px 12px;font-size:12px;color:#1e293b;border-bottom:1px solid #fee2e2">${r.region}</td>
-        <td style="padding:8px 12px;font-size:12px;color:#1e293b;border-bottom:1px solid #fee2e2;text-align:center">${r.customers}</td>
-        <td style="padding:8px 12px;font-size:12px;color:#dc2626;font-weight:700;border-bottom:1px solid #fee2e2;text-align:right">${formatNum(Number(r.total))}</td>
+      <tr class="dts bad" style="background:${i % 2 === 0 ? "#fff5f5" : "#ffffff"}">
+        <td>${r.territory}</td>
+        <td>${r.region}</td>
+        <td class="c">${r.customers}</td>
+        <td class="r total">${formatNum(Number(r.total))}</td>
       </tr>`,
     )
     .join("");
@@ -149,11 +171,11 @@ export function buildDashboardEmail(data: {
   const top5CustomerRows = (deepInsights?.performers?.top5_customers || [])
     .map(
       (r: any, i: number) => `
-      <tr style="background:${i % 2 === 0 ? "#f0fdf4" : "#ffffff"}">
-        <td style="padding:8px 12px;font-size:12px;color:#1e293b;border-bottom:1px solid #bbf7d0">${r.customer_name}</td>
-        <td style="padding:8px 12px;font-size:12px;color:#1e293b;border-bottom:1px solid #bbf7d0">${r.region}</td>
-        <td style="padding:8px 12px;font-size:12px;color:#1e293b;border-bottom:1px solid #bbf7d0">${r.territory}</td>
-        <td style="padding:8px 12px;font-size:12px;color:#16a34a;font-weight:700;border-bottom:1px solid #bbf7d0;text-align:right">${formatNum(Number(r.total))}</td>
+      <tr class="dts good" style="background:${i % 2 === 0 ? "#f0fdf4" : "#ffffff"}">
+        <td>${r.customer_name}</td>
+        <td>${r.region}</td>
+        <td>${r.territory}</td>
+        <td class="r total">${formatNum(Number(r.total))}</td>
       </tr>`,
     )
     .join("");
@@ -166,10 +188,10 @@ export function buildDashboardEmail(data: {
     .map(
       (r: any, i: number) => `
       <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"}">
-        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;white-space:nowrap">${r.area}</td>
-        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;white-space:nowrap">${r.region}</td>
-        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:center">${r.customers}</td>
-        <td style="padding:10px 14px;font-size:13px;font-weight:700;color:#1d4370;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${formatNum(Number(r.total))}</td>
+        <td>${r.area}</td>
+        <td>${r.region}</td>
+        <td class="c">${r.customers}</td>
+        <td class="r total">${formatNum(Number(r.total))}</td>
       </tr>`,
     )
     .join("");
@@ -181,11 +203,11 @@ export function buildDashboardEmail(data: {
     .slice(0, 5)
     .map(
       (r: any, i: number) => `
-      <tr style="background:${i % 2 === 0 ? "#f0fdf4" : "#ffffff"}">
-        <td style="padding:8px 12px;font-size:12px;color:#1e293b;border-bottom:1px solid #bbf7d0">${r.area}</td>
-        <td style="padding:8px 12px;font-size:12px;color:#1e293b;border-bottom:1px solid #bbf7d0">${r.region}</td>
-        <td style="padding:8px 12px;font-size:12px;color:#1e293b;border-bottom:1px solid #bbf7d0;text-align:center">${r.customers}</td>
-        <td style="padding:8px 12px;font-size:12px;color:#16a34a;font-weight:700;border-bottom:1px solid #bbf7d0;text-align:right">${formatNum(Number(r.total))}</td>
+      <tr class="dts good" style="background:${i % 2 === 0 ? "#f0fdf4" : "#ffffff"}">
+        <td>${r.area}</td>
+        <td>${r.region}</td>
+        <td class="c">${r.customers}</td>
+        <td class="r total">${formatNum(Number(r.total))}</td>
       </tr>`,
     )
     .join("");
@@ -198,10 +220,10 @@ export function buildDashboardEmail(data: {
       const barWidth = Math.max(0, Math.min(100, pct));
       return `
       <tr style="background:#ffffff">
-        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;white-space:nowrap">${p.name}</td>
-        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${formatNum(p.mtd_sales)}</td>
-        <td style="padding:10px 14px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${formatNum(p.target)}</td>
-        <td style="padding:10px 14px;font-size:13px;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">
+        <td>${p.name}</td>
+        <td class="r">${formatNum(p.mtd_sales)}</td>
+        <td class="r">${formatNum(p.target)}</td>
+        <td class="r">
           <div style="display:inline-flex;align-items:center;gap:6px">
             <div style="width:60px;height:6px;border-radius:3px;background:${barBg};overflow:hidden">
               <div style="width:${barWidth}%;height:100%;background:${color}"></div>
@@ -212,6 +234,92 @@ export function buildDashboardEmail(data: {
       </tr>`;
     })
     .join("");
+
+  // Brand colors per product, used for each RSM/Region table's header
+  // instead of the generic gradient used elsewhere in the email.
+  const PRODUCT_COLORS: Record<string, string> = {
+    PLC: "#008037", // Supercrete
+    "PLC+": "#d01e2799", // Supercrete Plus
+    POW: "#e2e60d99", // Powercrete
+    HOLCIM: "#ef060e", // Holcim (PCC + OPC)
+    HWP: "#1E3C72", // Holcim Water Protect
+    HCG: "#0090C8", // Holcim Coastal Guard
+  };
+
+  // ── RSM / Region report (D2R) — one table per product. Column layout
+  // matches the standalone report exactly: Region | RSM | Target | MTD
+  // Target | MTD Sales | Ach% | Today's Sales | Ach% | Per Day Req |
+  // Reg/Day. ach_mtd / ach_today arrive from SQL as fractions (e.g. 0.875),
+  // so they're multiplied by 100 here for display.
+  const renderRsmTable = (group: {
+    product: string;
+    colorKey?: string;
+    rows: any[];
+  }) => {
+    if (!group.rows.length) return "";
+
+    const headerColor = PRODUCT_COLORS[group.colorKey || ""] || "#1D4370";
+
+    const rows = group.rows
+      .map((r: any, i: number) => {
+        const achMtdPct = Number(r.ach_mtd) * 100;
+        const achTodayPct = Number(r.ach_today) * 100;
+        const achMtdColor =
+          achMtdPct >= 100
+            ? "#16a34a"
+            : achMtdPct >= 75
+              ? "#f59e0b"
+              : "#dc2626";
+        const achTodayColor =
+          achTodayPct >= 100
+            ? "#16a34a"
+            : achTodayPct >= 75
+              ? "#f59e0b"
+              : "#dc2626";
+
+        return `
+        <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"}">
+          <td>${r.region}</td>
+          <td>${r.rsm}</td>
+          <td class="r">${formatNum(r.target)}</td>
+          <td class="r">${formatNum(r.mtd_target)}</td>
+          <td class="r">${formatNum(r.mtd_sales)}</td>
+          <td class="r" style="font-weight:700;color:${achMtdColor}">${achMtdPct.toFixed(1)}%</td>
+          <td class="r">${formatNum(r.todays_sales)}</td>
+          <td class="r" style="font-weight:700;color:${achTodayColor}">${achTodayPct.toFixed(1)}%</td>
+          <td class="r">${formatNum(r.per_day_req)}</td>
+          <td class="r">${formatNum(r.reg_per_day)}</td>
+        </tr>`;
+      })
+      .join("");
+
+    return `
+    <div class="section-card">
+      <div class="section-title">📋 ${group.product} — RSM / Region</div>
+      <div class="swipe-hint">Swipe left to see all columns →</div>
+      <div class="chart-scroll" style="border:none">
+        <table class="dt" cellpadding="0" cellspacing="0" style="min-width:900px;width:100%">
+          <thead>
+            <tr style="background:${headerColor}">
+              <th class="l">Region</th>
+              <th class="l">RSM</th>
+              <th class="r">Target</th>
+              <th class="r">MTD Target</th>
+              <th class="r">MTD Sales</th>
+              <th class="r">Ach % (Target)</th>
+              <th class="r">Today's Sales</th>
+              <th class="r">Ach % (Target)</th>
+              <th class="r">Per Day Req</th>
+              <th class="r">Reg/Day</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  };
+
+  const rsmTablesHtml = rsmByProduct.map(renderRsmTable).join("");
 
   // Chart lookups — adjust keywords to match your actual chart names
   const regionChart = getChart("region");
@@ -228,7 +336,7 @@ export function buildDashboardEmail(data: {
   const customerTypeChart =
     getChart("customer-type") || getChart("customer type");
 
-  return `
+  const html = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -241,6 +349,71 @@ export function buildDashboardEmail(data: {
     * { box-sizing: border-box; }
     body { margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif }
     img { -ms-interpolation-mode:bicubic; }
+
+    /* ---- section / card shells (was repeated inline on every section) ---- */
+    .section-card {
+      background:white;
+      border-radius:12px;
+      border:1px solid #e2e8f0;
+      padding:20px;
+      margin-bottom:16px;
+    }
+    .section-title {
+      font-size:15px;
+      font-weight:700;
+      color:#1e293b;
+      margin-bottom:12px;
+    }
+    .swipe-hint {
+      font-size:11px;
+      color:#94a3b8;
+      margin-bottom:12px;
+      margin-top:-8px;
+    }
+
+    /* ---- generic data table (Region / Product / Area / MTD / RSM) ---- */
+    .dt { border-collapse:collapse; }
+    .dt th {
+      padding:10px 14px;
+      font-size:12px;
+      font-weight:600;
+      color:#ffffff;
+      white-space:nowrap;
+    }
+    .dt td {
+      padding:10px 14px;
+      font-size:13px;
+      color:#1e293b;
+      border-bottom:1px solid #e2e8f0;
+      white-space:nowrap;
+    }
+    .dt td.total { font-weight:700; color:#1d4370; }
+
+    /* ---- smaller insight tables (Bottom Performers / Top Customers) ---- */
+    .dts { border-collapse:collapse; }
+    .dts th {
+      padding:8px 12px;
+      font-size:11px;
+      font-weight:600;
+      white-space:nowrap;
+    }
+    .dts td {
+      padding:8px 12px;
+      font-size:12px;
+      color:#1e293b;
+      white-space:nowrap;
+    }
+    .dts.bad th { color:#dc2626; text-align:left; border-bottom:1px solid #fee2e2; }
+    .dts.bad td { border-bottom:1px solid #fee2e2; }
+    .dts.bad td.total { color:#dc2626; font-weight:700; }
+    .dts.good th { color:#16a34a; text-align:left; border-bottom:1px solid #bbf7d0; }
+    .dts.good td { border-bottom:1px solid #bbf7d0; }
+    .dts.good td.total { color:#16a34a; font-weight:700; }
+
+    /* shared alignment helpers */
+    .l { text-align:left; }
+    .r { text-align:right; }
+    .c { text-align:center; }
 
     /* ---- chart card (single, consistent scroll container) ---- */
     .chart-card {
@@ -296,12 +469,10 @@ export function buildDashboardEmail(data: {
       border-radius:8px;
     }
 
-    /* DESKTOP DEFAULT: wide charts (heatmap / ranking / area) now scale
-       DOWN to fit the card's actual width, exactly like normal charts.
-       Previously this rule forced min-width:100% + max-width:none,
-       which locked the image to its native pixel size — on a roomy
-       desktop window that meant the chart rendered oversized and got
-       clipped/zoomed inside the card. This fixes that. */
+    /* DESKTOP DEFAULT: wide charts (heatmap / ranking / area) scale DOWN
+       to fit the card's actual width, exactly like normal charts, instead
+       of being locked to native pixel size (which caused oversized /
+       clipped charts on desktop). */
     .chart-img--wide {
       display:block;
       width:100%;
@@ -312,8 +483,7 @@ export function buildDashboardEmail(data: {
     }
 
     /* MOBILE ONLY: flip wide charts back to a fixed min-width so the
-       existing pinch/scroll UX on phones (which already looked right)
-       is preserved unchanged. */
+       existing pinch/scroll UX on phones is preserved unchanged. */
     @media screen and (max-width:640px) {
       .chart-img--wide {
         width:auto;
@@ -345,6 +515,13 @@ export function buildDashboardEmail(data: {
        support @media queries, so we use them to reflow the
        fixed-width table layouts into single columns below
        640px instead of leaving everything tiny / squished.
+
+       IMPORTANT: these only take effect if the message is NOT
+       clipped by Gmail's ~102KB size limit — a clipped message
+       opens in a separate raw-HTML view that ignores this
+       block entirely. Keeping total HTML size well under that
+       threshold (see class-based tables above) is what makes
+       this section actually work in practice.
        ════════════════════════════════════════════════════════ */
     @media screen and (max-width:640px) {
       .email-container { padding:16px 10px !important; }
@@ -479,8 +656,8 @@ export function buildDashboardEmail(data: {
     </table>
 
     <!-- ═══ 2. EXECUTIVE INSIGHTS ═══ -->
-    <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
-      <div class="section-title" style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:16px">💡 Executive Insights</div>
+    <div class="section-card">
+      <div class="section-title">💡 Executive Insights</div>
       <table width="100%" cellpadding="0" cellspacing="0">
         <tr>
           <td class="insight-cell" width="50%" style="padding:4px">
@@ -525,21 +702,21 @@ export function buildDashboardEmail(data: {
       mtdTarget
         ? `
     <!-- ═══ 2b. MTD TARGET ACHIEVEMENT ═══ -->
-    <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
-      <div class="section-title" style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:4px">🎯 MTD Target Achievement</div>
+    <div class="section-card">
+      <div class="section-title" style="margin-bottom:4px">🎯 MTD Target Achievement</div>
       <div style="font-size:12px;color:#64748b;margin-bottom:12px">
         Overall: <strong style="color:#1e293b">${formatNum(mtdTarget.total_mtd_sales)}</strong> of
         <strong style="color:#1e293b">${formatNum(mtdTarget.total_target)}</strong> target
         (<strong style="color:${Number(mtdTarget.overall_achievement_pct) >= 100 ? "#16a34a" : Number(mtdTarget.overall_achievement_pct) >= 75 ? "#f59e0b" : "#dc2626"}">${Number(mtdTarget.overall_achievement_pct).toFixed(1)}%</strong>)
       </div>
       <div class="chart-scroll" style="border:none">
-        <table cellpadding="0" cellspacing="0" style="width:100%;min-width:420px">
+        <table class="dt" cellpadding="0" cellspacing="0" style="width:100%;min-width:420px">
           <thead>
             <tr style="background:linear-gradient(to right,#94C12E,#10BBE1,#1D4370)">
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:left;white-space:nowrap">Product</th>
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">MTD Sales</th>
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">Target</th>
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">Achievement</th>
+              <th class="l">Product</th>
+              <th class="r">MTD Sales</th>
+              <th class="r">Target</th>
+              <th class="r">Achievement</th>
             </tr>
           </thead>
           <tbody>${mtdTargetRows}</tbody>
@@ -551,21 +728,21 @@ export function buildDashboardEmail(data: {
     }
 
     <!-- ═══ 3. REGION PERFORMANCE TABLE ═══ -->
-    <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:16px">
-      <div class="section-title" style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:4px">📊 Region Performance</div>
-      <div style="font-size:11px;color:#94a3b8;margin-bottom:12px">Swipe left to see all columns →</div>
+    <div class="section-card">
+      <div class="section-title" style="margin-bottom:4px">📊 Region Performance</div>
+      <div class="swipe-hint">Swipe left to see all columns →</div>
       <div class="chart-scroll" style="border:none">
-        <table cellpadding="0" cellspacing="0" style="min-width:700px;width:100%">
+        <table class="dt" cellpadding="0" cellspacing="0" style="min-width:700px;width:100%">
           <thead>
             <tr style="background:linear-gradient(to right,#94C12E,#10BBE1,#1D4370)">
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:left;white-space:nowrap">Region</th>
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">Supercrete</th>
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">Supercrete+</th>
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">Powercreate</th>
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">HOLCIM</th>
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">HWP</th>
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">HCG</th>
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">Total</th>
+              <th class="l">Region</th>
+              <th class="r">Supercrete</th>
+              <th class="r">Supercrete+</th>
+              <th class="r">Powercreate</th>
+              <th class="r">HOLCIM</th>
+              <th class="r">HWP</th>
+              <th class="r">HCG</th>
+              <th class="r">Total</th>
             </tr>
           </thead>
           <tbody>${regionRows}</tbody>
@@ -577,15 +754,15 @@ export function buildDashboardEmail(data: {
     ${renderChart(regionChart, { label: "Region Performance Chart" })}
 
     <!-- ═══ 5. PRODUCT MIX TABLE ═══ -->
-    <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:16px">
-      <div class="section-title" style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:12px">🥧 Product Mix</div>
+    <div class="section-card">
+      <div class="section-title">🥧 Product Mix</div>
       <div class="chart-scroll" style="border:none">
-        <table cellpadding="0" cellspacing="0" style="width:100%;min-width:320px">
+        <table class="dt" cellpadding="0" cellspacing="0" style="width:100%;min-width:320px">
           <thead>
             <tr style="background:linear-gradient(to right,#94C12E,#10BBE1,#1D4370)">
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:left;white-space:nowrap">Product</th>
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">Volume</th>
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">% Share</th>
+              <th class="l">Product</th>
+              <th class="r">Volume</th>
+              <th class="r">% Share</th>
             </tr>
           </thead>
           <tbody>${productRows}</tbody>
@@ -610,18 +787,21 @@ export function buildDashboardEmail(data: {
       hint: "👆 Swipe / pinch to explore the full heatmap",
     })}
 
+     <!-- ═══ 11c. RSM / REGION REPORT (D2R, product-wise) ═══ -->
+    ${rsmTablesHtml}
+
     <!-- ═══ 9. AREA PERFORMANCE TABLE (all areas) ═══ -->
-    <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:16px">
-      <div class="section-title" style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:4px">📍 Area Performance — All Areas</div>
-      <div style="font-size:11px;color:#94a3b8;margin-bottom:12px">Swipe left to see all columns →</div>
+    <div class="section-card">
+      <div class="section-title" style="margin-bottom:4px">📍 Area Performance — All Areas</div>
+      <div class="swipe-hint">Swipe left to see all columns →</div>
       <div class="chart-scroll" style="border:none">
-        <table cellpadding="0" cellspacing="0" style="width:100%;min-width:420px">
+        <table class="dt" cellpadding="0" cellspacing="0" style="width:100%;min-width:420px">
           <thead>
             <tr style="background:linear-gradient(to right,#94C12E,#10BBE1,#1D4370)">
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:left;white-space:nowrap">Area</th>
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:left;white-space:nowrap">Region</th>
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:center;white-space:nowrap">Customers</th>
-              <th style="padding:10px 14px;font-size:12px;font-weight:600;color:white;text-align:right;white-space:nowrap">Total Sales</th>
+              <th class="l">Area</th>
+              <th class="l">Region</th>
+              <th class="c">Customers</th>
+              <th class="r">Total Sales</th>
             </tr>
           </thead>
           <tbody>${areaRows}</tbody>
@@ -630,16 +810,16 @@ export function buildDashboardEmail(data: {
     </div>
 
     <!-- ═══ 9b. TOP 5 AREAS (written table, not just the chart) ═══ -->
-    <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:16px">
-      <div class="section-title" style="font-size:15px;font-weight:700;color:#16a34a;margin-bottom:16px">🏆 Top 5 Areas</div>
+    <div class="section-card">
+      <div class="section-title" style="color:#16a34a">🏆 Top 5 Areas</div>
       <div class="chart-scroll" style="border:none">
-        <table cellpadding="0" cellspacing="0" style="width:100%;min-width:380px">
+        <table class="dts good" cellpadding="0" cellspacing="0" style="width:100%;min-width:380px">
           <thead>
             <tr style="background:#f0fdf4">
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#16a34a;text-align:left;border-bottom:1px solid #bbf7d0;white-space:nowrap">Area</th>
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#16a34a;text-align:left;border-bottom:1px solid #bbf7d0;white-space:nowrap">Region</th>
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#16a34a;text-align:center;border-bottom:1px solid #bbf7d0;white-space:nowrap">Customers</th>
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#16a34a;text-align:right;border-bottom:1px solid #bbf7d0;white-space:nowrap">Total Sales</th>
+              <th class="l">Area</th>
+              <th class="l">Region</th>
+              <th class="c">Customers</th>
+              <th class="r">Total Sales</th>
             </tr>
           </thead>
           <tbody>${top5AreaRows}</tbody>
@@ -669,17 +849,17 @@ export function buildDashboardEmail(data: {
     })}
 
     <!-- ═══ 12. DEEP INSIGHTS — BOTTOM PERFORMERS ═══ -->
-    <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
-      <div class="section-title" style="font-size:15px;font-weight:700;color:#dc2626;margin-bottom:16px">⚠️ Bottom Performers</div>
+    <div class="section-card" style="margin-bottom:24px">
+      <div class="section-title" style="color:#dc2626">⚠️ Bottom Performers</div>
 
       <div style="font-size:12px;font-weight:700;color:#dc2626;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;padding-bottom:4px;border-bottom:2px solid #fee2e2">Bottom 5 TSM / TSE</div>
       <div class="chart-scroll" style="border:none;margin-bottom:20px">
-        <table cellpadding="0" cellspacing="0" style="width:100%;min-width:320px">
+        <table class="dts bad" cellpadding="0" cellspacing="0" style="width:100%;min-width:320px">
           <thead>
             <tr style="background:#fef2f2">
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#dc2626;text-align:left;border-bottom:1px solid #fee2e2">TSM/TSE</th>
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#dc2626;text-align:center;border-bottom:1px solid #fee2e2">Customers</th>
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#dc2626;text-align:right;border-bottom:1px solid #fee2e2">Total Sales</th>
+              <th class="l">TSM/TSE</th>
+              <th class="c" style="text-align:center">Customers</th>
+              <th class="r" style="text-align:right">Total Sales</th>
             </tr>
           </thead>
           <tbody>${bottom5TsmRows}</tbody>
@@ -688,12 +868,12 @@ export function buildDashboardEmail(data: {
 
       <div style="font-size:12px;font-weight:700;color:#dc2626;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;padding-bottom:4px;border-bottom:2px solid #fee2e2">Bottom 5 ASM / KAM</div>
       <div class="chart-scroll" style="border:none;margin-bottom:20px">
-        <table cellpadding="0" cellspacing="0" style="width:100%;min-width:320px">
+        <table class="dts bad" cellpadding="0" cellspacing="0" style="width:100%;min-width:320px">
           <thead>
             <tr style="background:#fef2f2">
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#dc2626;text-align:left;border-bottom:1px solid #fee2e2">ASM/KAM</th>
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#dc2626;text-align:center;border-bottom:1px solid #fee2e2">Customers</th>
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#dc2626;text-align:right;border-bottom:1px solid #fee2e2">Total Sales</th>
+              <th class="l">ASM/KAM</th>
+              <th class="c" style="text-align:center">Customers</th>
+              <th class="r" style="text-align:right">Total Sales</th>
             </tr>
           </thead>
           <tbody>${bottom5AsmRows}</tbody>
@@ -702,13 +882,13 @@ export function buildDashboardEmail(data: {
 
       <div style="font-size:12px;font-weight:700;color:#dc2626;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;padding-bottom:4px;border-bottom:2px solid #fee2e2">Bottom 5 Territories</div>
       <div class="chart-scroll" style="border:none">
-        <table cellpadding="0" cellspacing="0" style="width:100%;min-width:380px">
+        <table class="dts bad" cellpadding="0" cellspacing="0" style="width:100%;min-width:380px">
           <thead>
             <tr style="background:#fef2f2">
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#dc2626;text-align:left;border-bottom:1px solid #fee2e2">Territory</th>
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#dc2626;text-align:left;border-bottom:1px solid #fee2e2">Region</th>
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#dc2626;text-align:center;border-bottom:1px solid #fee2e2">Customers</th>
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#dc2626;text-align:right;border-bottom:1px solid #fee2e2">Total Sales</th>
+              <th class="l">Territory</th>
+              <th class="l">Region</th>
+              <th class="c" style="text-align:center">Customers</th>
+              <th class="r" style="text-align:right">Total Sales</th>
             </tr>
           </thead>
           <tbody>${bottom5TerRows}</tbody>
@@ -717,16 +897,16 @@ export function buildDashboardEmail(data: {
     </div>
 
     <!-- ═══ 13. TOP CUSTOMERS ═══ -->
-    <div class="section-card" style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:20px;margin-bottom:24px">
-      <div class="section-title" style="font-size:15px;font-weight:700;color:#16a34a;margin-bottom:16px">🏆 Top 5 Customers</div>
+    <div class="section-card" style="margin-bottom:24px">
+      <div class="section-title" style="color:#16a34a">🏆 Top 5 Customers</div>
       <div class="chart-scroll" style="border:none">
-        <table cellpadding="0" cellspacing="0" style="width:100%;min-width:380px">
+        <table class="dts good" cellpadding="0" cellspacing="0" style="width:100%;min-width:380px">
           <thead>
             <tr style="background:#f0fdf4">
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#16a34a;text-align:left;border-bottom:1px solid #bbf7d0;white-space:nowrap">Customer</th>
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#16a34a;text-align:left;border-bottom:1px solid #bbf7d0;white-space:nowrap">Region</th>
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#16a34a;text-align:left;border-bottom:1px solid #bbf7d0;white-space:nowrap">Territory</th>
-              <th style="padding:8px 12px;font-size:11px;font-weight:600;color:#16a34a;text-align:right;border-bottom:1px solid #bbf7d0;white-space:nowrap">Total Sales</th>
+              <th class="l">Customer</th>
+              <th class="l">Region</th>
+              <th class="l">Territory</th>
+              <th class="r" style="text-align:right">Total Sales</th>
             </tr>
           </thead>
           <tbody>${top5CustomerRows}</tbody>
@@ -750,4 +930,21 @@ export function buildDashboardEmail(data: {
 </body>
 </html>
   `;
+
+  // ── Size guard ────────────────────────────────────────────────────
+  // Gmail clips messages around ~102KB of HTML. The clipped "View entire
+  // message" render opens the raw HTML standalone and ignores the
+  // @media queries above — that's what breaks responsiveness for the
+  // CEO. This just logs a warning so you catch data growth (e.g. more
+  // regions/areas/RSMs added later) before it silently starts clipping
+  // again. It does not alter the returned HTML.
+  const sizeKB = Buffer.byteLength(html, "utf8") / 1024;
+  if (sizeKB > 90) {
+    console.warn(
+      `⚠️ Dashboard email HTML is ${sizeKB.toFixed(1)}KB — Gmail clips around ~102KB. ` +
+        `Consider trimming rsmTablesHtml/areaRows or relying more on dashboardUrl.`,
+    );
+  }
+
+  return html;
 }

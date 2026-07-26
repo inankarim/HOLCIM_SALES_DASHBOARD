@@ -1491,6 +1491,199 @@ export const getDeepInsights = async (
   }
 };
 
+// ─── GET /api/sales/rsm-region-report ─────────────────────────────────────────
+// Product-wise Target / MTD Target / MTD Sales, grouped by Region + RSM.
+// Six products (PLC, PLC+, Powercrete, Holcim, HWP, HCG) reported separately,
+// EXCLUDING customer_type = 'D2R' — plus a 7th "D2R" entry where all 6
+// products are summed together into one combined figure per region/RSM
+// instead of being split out.
+//
+// This is a snapshot metric (like getMtdTargetByProduct) — a selected date
+// range collapses to its latest upload date via resolveMtdSnapshotFilter,
+// since target/mtd_sales are cumulative-as-of-upload values, not something
+// that can be summed across dates.
+//
+// MTD Target = (monthly target / 30) * day-of-month of the resolved date.
+export const getRsmRegionReport = async (
+  req: AuthRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const dateFilter = await resolveDateFilter(req.query);
+    const { mtdDate } = await resolveMtdSnapshotFilter(req.query, dateFilter);
+
+    if (!mtdDate) {
+      res.json({ date_used: null, data: [] });
+      return;
+    }
+
+    // Optional region filter (e.g. ?region=Sylhet) — only filter this
+    // endpoint currently supports, since it's the primary dimension used
+    // on the dashboard for this report.
+    const regionFilter = req.query.region ? " AND region = $2" : "";
+    const queryParams = req.query.region
+      ? [mtdDate, req.query.region]
+      : [mtdDate];
+
+    // Per-product breakdown (excludes D2R)
+    const productResult = await pool.query(
+      `
+      WITH product_unpivot AS (
+        SELECT region, rsm_b2b_head AS rsm, upload_date, customer_type,
+               'PLC' AS product, plc_target AS target, plc_mtd_sales AS mtd_sales, plc_yesterday AS yesterday
+        FROM sales_current
+        UNION ALL
+        SELECT region, rsm_b2b_head, upload_date, customer_type,
+               'PLC+', plc_plus_target, plc_plus_mtd_sales, plc_plus_yesterday
+        FROM sales_current
+        UNION ALL
+        SELECT region, rsm_b2b_head, upload_date, customer_type,
+               'Powercrete', powercrete_target, powercrete_mtd_sales, powercrete_yesterday
+        FROM sales_current
+        UNION ALL
+        SELECT region, rsm_b2b_head, upload_date, customer_type,
+               'Holcim', pcc_opc_target, pcc_opc_mtd_sales, pcc_opc_yesterday
+        FROM sales_current
+        UNION ALL
+        SELECT region, rsm_b2b_head, upload_date, customer_type,
+               'HWP', hwp_target, hwp_mtd_sales, hwp_yesterday
+        FROM sales_current
+        UNION ALL
+        SELECT region, rsm_b2b_head, upload_date, customer_type,
+               'HCG', hcg_target, hcg_mtd_sales, hcg_yesterday
+        FROM sales_current
+      ),
+      params AS (
+        SELECT EXTRACT(DAY FROM $1::date) AS day_of_month
+      ),
+      agg AS (
+        SELECT
+          product, region, rsm,
+          SUM(target) AS target_sum,
+          SUM(mtd_sales) AS mtd_sales_sum,
+          SUM(yesterday) AS yesterday_sum
+        FROM product_unpivot
+        WHERE upload_date = $1
+          AND customer_type != 'D2R'
+          ${regionFilter}
+        GROUP BY product, region, rsm
+      )
+      SELECT
+        a.product,
+        a.region,
+        a.rsm,
+        a.target_sum,
+        ROUND(a.target_sum / 30.0 * p.day_of_month, 2) AS mtd_target,
+        a.mtd_sales_sum,
+        ROUND(a.mtd_sales_sum / NULLIF(a.target_sum / 30.0 * p.day_of_month, 0), 4) AS ach_mtd,
+        a.yesterday_sum,
+        ROUND(a.yesterday_sum / NULLIF(a.target_sum / 30.0, 0), 4) AS ach_today,
+        ROUND((a.target_sum - a.mtd_sales_sum) / NULLIF(30 - p.day_of_month, 0), 2) AS per_day_req,
+        ROUND(a.mtd_sales_sum / NULLIF(p.day_of_month, 0), 2) AS reg_per_day
+      FROM agg a
+      CROSS JOIN params p
+      ORDER BY a.product, a.region, a.rsm
+      `,
+      queryParams,
+    );
+
+    // D2R — all 6 products summed together, not split out
+    const d2rResult = await pool.query(
+      `
+      WITH totals AS (
+        SELECT
+          region,
+          rsm_b2b_head AS rsm,
+          SUM(plc_target + plc_plus_target + powercrete_target + pcc_opc_target + hwp_target + hcg_target) AS target_sum,
+          SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS mtd_sales_sum,
+          SUM(plc_yesterday + plc_plus_yesterday + powercrete_yesterday + pcc_opc_yesterday + hwp_yesterday + hcg_yesterday) AS yesterday_sum
+        FROM sales_current
+        WHERE upload_date = $1
+          AND customer_type = 'D2R'
+          ${regionFilter}
+        GROUP BY region, rsm_b2b_head
+      ),
+      params AS (
+        SELECT EXTRACT(DAY FROM $1::date) AS day_of_month
+      )
+      SELECT
+        t.region,
+        t.rsm,
+        t.target_sum,
+        ROUND(t.target_sum / 30.0 * p.day_of_month, 2) AS mtd_target,
+        t.mtd_sales_sum,
+        ROUND(t.mtd_sales_sum / NULLIF(t.target_sum / 30.0 * p.day_of_month, 0), 4) AS ach_mtd,
+        t.yesterday_sum,
+        ROUND(t.yesterday_sum / NULLIF(t.target_sum / 30.0, 0), 4) AS ach_today,
+        ROUND((t.target_sum - t.mtd_sales_sum) / NULLIF(30 - p.day_of_month, 0), 2) AS per_day_req,
+        ROUND(t.mtd_sales_sum / NULLIF(p.day_of_month, 0), 2) AS reg_per_day
+      FROM totals t
+      CROSS JOIN params p
+      ORDER BY t.region, t.rsm
+      `,
+      queryParams,
+    );
+
+    const RSM_PRODUCT_META: Record<
+      string,
+      { label: string; colorKey: string }
+    > = {
+      PLC: { label: "Supercrete", colorKey: "PLC" },
+      "PLC+": { label: "Supercrete+", colorKey: "PLC+" },
+      Powercrete: { label: "Powercrete", colorKey: "POW" },
+      Holcim: { label: "Holcim (PCC+OPC)", colorKey: "HOLCIM" },
+      HWP: { label: "HWP", colorKey: "HWP" },
+      HCG: { label: "HCG", colorKey: "HCG" },
+    };
+
+    const rsmByProduct = Object.entries(RSM_PRODUCT_META).map(
+      ([key, meta]) => ({
+        product: meta.label,
+        colorKey: meta.colorKey,
+        rows: productResult.rows
+          .filter((r: any) => r.product === key)
+          .map((r: any) => ({
+            region: r.region,
+            rsm: r.rsm,
+            target: Number(r.target_sum),
+            mtd_target: Number(r.mtd_target),
+            mtd_sales: Number(r.mtd_sales_sum),
+            ach_mtd: Number(r.ach_mtd),
+            todays_sales: Number(r.yesterday_sum),
+            ach_today: Number(r.ach_today),
+            per_day_req: Number(r.per_day_req),
+            reg_per_day: Number(r.reg_per_day),
+          })),
+      }),
+    );
+
+    rsmByProduct.push({
+      product: "D2R",
+      colorKey: "D2R",
+      rows: d2rResult.rows.map((r: any) => ({
+        region: r.region,
+        rsm: r.rsm,
+        target: Number(r.target_sum),
+        mtd_target: Number(r.mtd_target),
+        mtd_sales: Number(r.mtd_sales_sum),
+        ach_mtd: Number(r.ach_mtd),
+        todays_sales: Number(r.yesterday_sum),
+        ach_today: Number(r.ach_today),
+        per_day_req: Number(r.per_day_req),
+        reg_per_day: Number(r.reg_per_day),
+      })),
+    });
+
+    res.json({
+      date_used: mtdDate,
+      data: rsmByProduct,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch RSM/Region report" });
+  }
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // D-1 DAILY REPORT ENDPOINTS
 // ═══════════════════════════════════════════════════════════════════════════
