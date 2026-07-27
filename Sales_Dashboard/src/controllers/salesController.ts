@@ -255,6 +255,10 @@ export const getAvailableDates = async (
 };
 
 // ─── GET /api/sales/kpi ───────────────────────────────────────────────────────
+// total_customers now counts DISTINCT sap_id (the real customer-account
+// identifier) instead of DISTINCT customer_name. Two different accounts
+// (different sap_id) can share an identical customer_name, which was
+// silently merging them into one and undercounting real customers.
 export const getKpi = async (
   req: AuthRequest,
   res: Response,
@@ -280,7 +284,7 @@ export const getKpi = async (
       `WITH ${perCustomerCte}
        SELECT
         COALESCE(SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales), 0) AS total_sales,
-        COUNT(DISTINCT customer_name)                                    AS total_customers,
+        COUNT(DISTINCT sap_id)                                           AS total_customers,
         COUNT(DISTINCT territory)                                        AS total_territories,
         COALESCE(AVG(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales), 0) AS avg_per_customer
        FROM per_customer`,
@@ -352,6 +356,85 @@ export const getKpi = async (
     });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch KPI" });
+  }
+};
+
+// ─── GET /api/sales/customers ─────────────────────────────────────────────────
+// Grouped by sap_id (the real customer-account identifier) instead of the
+// descriptive text fields. Previously GROUP BY customer_name, region, area,
+// territory, tsm_tse, asm_kam, rsm_b2b_head produced one row per unique
+// combination of those text fields, which doesn't match "one row per real
+// customer account" whenever sap_id and customer_name diverge — that's why
+// this table's total_customers didn't match the KPI card's count. The
+// descriptive fields are still returned (via MAX, safe since they're
+// constant per sap_id on a single resolved date/range) so nothing else in
+// the UI needs to change.
+export const getCustomers = async (
+  req: AuthRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { clause, params, defaultDate } = await resolveDateFilter(req.query);
+    const { extra, params: allParams } = buildFilters(req.query, params);
+
+    const result = await pool.query(
+      `SELECT
+        sap_id,
+        MAX(customer_name) AS customer_name,
+        MAX(region)        AS region,
+        MAX(area)          AS area,
+        MAX(territory)     AS territory,
+        MAX(tsm_tse)       AS tsm_tse,
+        MAX(asm_kam)       AS asm_kam,
+        MAX(rsm_b2b_head)  AS rsm_b2b_head,
+        ${productValueCols()},
+        SUM(plc_yesterday + plc_plus_yesterday + powercrete_yesterday + pcc_opc_yesterday + hwp_yesterday + hcg_yesterday) AS total
+       FROM sales_current
+       ${clause}${extra}
+       GROUP BY sap_id
+       ORDER BY total DESC`,
+      allParams,
+    );
+
+    const grandTotal = result.rows.reduce((s, r) => s + Number(r.total), 0);
+
+    const customers = result.rows.map((r) => ({
+      customer_name: r.customer_name,
+      region: r.region,
+      area: r.area,
+      territory: r.territory,
+      tsm_tse: r.tsm_tse,
+      asm_kam: r.asm_kam,
+      rsm_b2b_head: r.rsm_b2b_head,
+      plc_mtd_sales: Number(r.plc_mtd_sales),
+      plc_plus_mtd_sales: Number(r.plc_plus_mtd_sales),
+      powercrete_mtd_sales: Number(r.powercrete_mtd_sales),
+      pcc_opc_mtd_sales: Number(r.pcc_opc_mtd_sales),
+      hwp_mtd_sales: Number(r.hwp_mtd_sales),
+      hcg_mtd_sales: Number(r.hcg_mtd_sales),
+      total: Number(r.total),
+      pct_share: grandTotal
+        ? Number(((Number(r.total) / grandTotal) * 100).toFixed(2))
+        : 0,
+    }));
+
+    res.json({
+      date_used: defaultDate,
+      total_customers: customers.length,
+      grand_total: grandTotal,
+      top5: customers.slice(0, 5),
+      // Exclude customers with 0 total sales from the bottom 5 — a
+      // zero-sale customer isn't a "weak performer" for this list, it's a
+      // non-buyer, and mixing them in crowds out customers who genuinely
+      // sold a small (non-zero) amount.
+      bottom5: customers
+        .filter((c) => c.total !== 0)
+        .slice(-5)
+        .reverse(),
+      data: customers,
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch customer data" });
   }
 };
 
@@ -803,75 +886,6 @@ export const getByTerritory = async (
     });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch territory data" });
-  }
-};
-
-// ─── GET /api/sales/customers ─────────────────────────────────────────────────
-export const getCustomers = async (
-  req: AuthRequest,
-  res: Response,
-): Promise<void> => {
-  try {
-    const { clause, params, defaultDate } = await resolveDateFilter(req.query);
-    const { extra, params: allParams } = buildFilters(req.query, params);
-
-    const result = await pool.query(
-      `SELECT
-        customer_name,
-        region,
-        area,
-        territory,
-        tsm_tse,
-        asm_kam,
-        rsm_b2b_head,
-        ${productValueCols()},
-        SUM(plc_yesterday + plc_plus_yesterday + powercrete_yesterday + pcc_opc_yesterday + hwp_yesterday + hcg_yesterday) AS total
-       FROM sales_current
-       ${clause}${extra}
-       GROUP BY customer_name, region, area, territory, tsm_tse, asm_kam, rsm_b2b_head
-       ORDER BY total DESC`,
-      allParams,
-    );
-
-    const grandTotal = result.rows.reduce((s, r) => s + Number(r.total), 0);
-
-    const customers = result.rows.map((r) => ({
-      customer_name: r.customer_name,
-      region: r.region,
-      area: r.area,
-      territory: r.territory,
-      tsm_tse: r.tsm_tse,
-      asm_kam: r.asm_kam,
-      rsm_b2b_head: r.rsm_b2b_head,
-      plc_mtd_sales: Number(r.plc_mtd_sales),
-      plc_plus_mtd_sales: Number(r.plc_plus_mtd_sales),
-      powercrete_mtd_sales: Number(r.powercrete_mtd_sales),
-      pcc_opc_mtd_sales: Number(r.pcc_opc_mtd_sales),
-      hwp_mtd_sales: Number(r.hwp_mtd_sales),
-      hcg_mtd_sales: Number(r.hcg_mtd_sales),
-      total: Number(r.total),
-      pct_share: grandTotal
-        ? Number(((Number(r.total) / grandTotal) * 100).toFixed(2))
-        : 0,
-    }));
-
-    res.json({
-      date_used: defaultDate,
-      total_customers: customers.length,
-      grand_total: grandTotal,
-      top5: customers.slice(0, 5),
-      // Exclude customers with 0 total sales from the bottom 5 — a
-      // zero-sale customer isn't a "weak performer" for this list, it's a
-      // non-buyer, and mixing them in crowds out customers who genuinely
-      // sold a small (non-zero) amount.
-      bottom5: customers
-        .filter((c) => c.total !== 0)
-        .slice(-5)
-        .reverse(),
-      data: customers,
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch customer data" });
   }
 };
 
