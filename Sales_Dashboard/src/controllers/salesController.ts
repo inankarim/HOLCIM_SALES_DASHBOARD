@@ -668,6 +668,14 @@ export const getByArea = async (
 };
 
 // ─── GET /api/sales/by-customer-type ──────────────────────────────────────────
+// ─── GET /api/sales/by-customer-type ──────────────────────────────────────────
+// Customer types are collapsed into 3 buckets for the dashboard charts:
+//   - "Distributor" stays as-is
+//   - "D2R" stays as-is
+//   - everything else (RMX, Real Estate, Contractor, RMC, Industrial, etc.)
+//     is rolled up into a single "B2B" bucket
+// sort_order forces Distributor → D2R → B2B regardless of totals; it's
+// selected only to drive ORDER BY and isn't included in the JSON response.
 export const getByCustomerType = async (
   req: AuthRequest,
   res: Response,
@@ -683,6 +691,18 @@ export const getByCustomerType = async (
         FROM sales_current
         ${clause}${extra}
         GROUP BY sap_id, customer_type
+      ),
+      grouped AS (
+        SELECT
+          CASE
+            WHEN customer_type = 'Distributor' THEN 'Distributor'
+            WHEN customer_type = 'D2R' THEN 'D2R'
+            ELSE 'B2B'
+          END AS customer_type,
+          plc_mtd_sales, plc_plus_mtd_sales, powercrete_mtd_sales,
+          pcc_opc_mtd_sales, hwp_mtd_sales, hcg_mtd_sales
+        FROM per_customer
+        WHERE customer_type IS NOT NULL AND customer_type != ''
       )
       SELECT
         customer_type,
@@ -692,12 +712,16 @@ export const getByCustomerType = async (
         SUM(pcc_opc_mtd_sales) AS pcc_opc_mtd_sales,
         SUM(hwp_mtd_sales)       AS hwp_mtd_sales,
         SUM(hcg_mtd_sales)       AS hcg_mtd_sales,
-        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total
-       FROM per_customer
-       WHERE customer_type IS NOT NULL AND customer_type != ''
+        SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS total,
+        CASE customer_type
+          WHEN 'Distributor' THEN 1
+          WHEN 'D2R' THEN 2
+          ELSE 3
+        END AS sort_order
+       FROM grouped
        GROUP BY customer_type
        HAVING SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) > 0
-       ORDER BY total DESC`,
+       ORDER BY sort_order`,
       allParams,
     );
 
@@ -708,8 +732,8 @@ export const getByCustomerType = async (
       grand_total: grandTotal,
       // data.total gives chart #1 (total sales by customer type); the
       // per-product fields on the same rows give chart #2 (product mix by
-      // customer type) — one endpoint serves both charts. Customer types
-      // with a total of 0 are excluded via the HAVING clause above.
+      // customer type) — one endpoint serves both charts. Now collapsed to
+      // 3 buckets: Distributor, D2R, B2B (everything else).
       data: result.rows.map((r) => ({
         customer_type: r.customer_type,
         plc_mtd_sales: Number(r.plc_mtd_sales),

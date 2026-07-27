@@ -22,7 +22,7 @@ export function buildDashboardEmail(data: {
     allAreas = [],
     rsmByProduct = [],
     charts = [],
-    dashboardUrl,
+    dashboardUrl = "http://10.238.128.70/",
   } = data;
 
   const formatNum = (value: number): string => {
