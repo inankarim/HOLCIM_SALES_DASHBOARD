@@ -91,7 +91,7 @@ export const sendDashboardEmail = async (
         )
         SELECT
           COALESCE(SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales), 0) AS total_sales,
-          COUNT(DISTINCT customer_name) AS total_customers,
+          COUNT(DISTINCT sap_id) AS total_customers,
           COUNT(DISTINCT territory) AS total_territories,
           COALESCE(AVG(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales), 0) AS avg_per_customer
         FROM per_customer

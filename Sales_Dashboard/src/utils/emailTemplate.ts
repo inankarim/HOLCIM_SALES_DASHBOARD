@@ -306,9 +306,9 @@ export function buildDashboardEmail(data: {
               <th class="r">Target</th>
               <th class="r">MTD Target</th>
               <th class="r">MTD Sales</th>
-              <th class="r">Ach % (Target)</th>
+              <th class="r">Ach % (MTD Target)</th>
               <th class="r">Today's Sales</th>
-              <th class="r">Ach % (Target)</th>
+              <th class="r">Ach % (SALES Target)</th>
               <th class="r">Per Day Req</th>
               <th class="r">Reg/Day</th>
             </tr>
