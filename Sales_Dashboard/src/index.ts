@@ -4,6 +4,7 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import authRoutes from "./routes/auth";
 import uploadRoutes from "./routes/upload";
+import targetUploadRoutes from "./routes/targetUploadRoutes";
 import salesRoutes from "./routes/sales";
 import emailRoutes from "./routes/email";
 import emailRecipientRoutes from "./routes/emailRecipients";
@@ -57,6 +58,17 @@ const uploadLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// ✅ Target uploads are monthly (at most a handful of attempts per session),
+// so this can be tighter than the daily sales uploadLimiter without ever
+// realistically blocking a legitimate admin.
+const targetUploadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  message: { error: "Too many target uploads, please try again later" },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ✅ New: generous limiter just for sales dashboard queries
 const salesLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -83,6 +95,7 @@ app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 // ✅ Each route group has its own specific path + limiter — no overlap
 app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/upload", uploadLimiter, uploadRoutes); // upload router internally uses POST /upload → now resolves to POST /api/upload/upload
+app.use("/api/targets", targetUploadLimiter, targetUploadRoutes); // monthly target upload, single file
 app.use("/api", salesLimiter, salesRoutes); // sales routes use /sales/* internally
 app.use("/api/email", emailLimiter, emailRoutes);
 app.use("/api/email-recipients", recipientLimiter, emailRecipientRoutes);

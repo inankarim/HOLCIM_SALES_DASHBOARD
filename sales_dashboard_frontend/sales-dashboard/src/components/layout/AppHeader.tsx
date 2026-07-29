@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { BarChart3,  LogOut, Menu, Brain } from "lucide-react";
+import { BarChart3, LogOut, Menu, Brain, Upload, Target } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { Button } from "../ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "../ui/sheet";
@@ -26,7 +26,10 @@ export function AppHeader() {
         : "text-white/70 hover:text-white hover:bg-white/10"
     }`;
 
-  const navLinks = user?.role === "admin" ? [] : [
+  const navLinks = user?.role === "admin" ? [
+    { to: "/upload", label: "Upload Sales", icon: Upload },
+    { to: "/upload-targets", label: "Upload Targets", icon: Target },
+  ] : [
     { to: "/", label: "Dashboard", icon: BarChart3 },
     { to: "/insights", label: "Deep Insights", icon: Brain }
     

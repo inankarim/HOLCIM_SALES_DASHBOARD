@@ -50,8 +50,19 @@ export const sendDashboardEmail = async (
     //     The result is still aliased as `${key}_mtd_sales` so downstream
     //     field names / the email template stay unchanged.
     //   - *_mtd_sales / *_target: the true cumulative MTD-vs-target snapshot.
-    //     Only the "MTD vs Target by product" query and the RSM/Region
-    //     reports below are meant to read these columns directly.
+    //     Only the "MTD vs Target by product" query below is meant to read
+    //     these columns directly.
+    //
+    // RSM / Region report (rsmReportResult / rsmReportD2RResult) is a
+    // SNAPSHOT metric like MTD vs Target, but it does NOT read *_target off
+    // sales_current — it joins the dedicated sales_targets table (via
+    // brand_product_map), the same source salesController.ts's
+    // getRsmRegionReport uses. sales_current's *_target columns don't carry
+    // the Distributor+B2B/D2R split this report needs, and region/customer
+    // type spelling isn't guaranteed to match 1:1 between sales_current and
+    // sales_targets, so both sides are normalized (letters only, lowercased)
+    // before joining — identical to the dashboard endpoint, so the emailed
+    // report can't drift from what the dashboard shows.
     const [
       kpiResult,
       regionResult,
@@ -199,13 +210,13 @@ export const sendDashboardEmail = async (
             GROUP BY customer_name, region, area, territory, tsm_tse
             ORDER BY total DESC LIMIT 5
           ) r) AS top5_customers,
-          (SELECT ROUND(SUM(CASE WHEN rn <= 5 THEN total ELSE 0 END) / MAX(grand_total) * 100, 2)
+          (SELECT ROUND((SUM(CASE WHEN rn <= 5 THEN total ELSE 0 END) / MAX(grand_total) * 100)::numeric, 2)
             FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY total DESC) AS rn FROM ranked_customers) r
             CROSS JOIN totals) AS top5_pct,
-          (SELECT ROUND(SUM(CASE WHEN rn <= 10 THEN total ELSE 0 END) / MAX(grand_total) * 100, 2)
+          (SELECT ROUND((SUM(CASE WHEN rn <= 10 THEN total ELSE 0 END) / MAX(grand_total) * 100)::numeric, 2)
             FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY total DESC) AS rn FROM ranked_customers) r
             CROSS JOIN totals) AS top10_pct,
-          (SELECT ROUND(SUM(CASE WHEN rn <= 20 THEN total ELSE 0 END) / MAX(grand_total) * 100, 2)
+          (SELECT ROUND((SUM(CASE WHEN rn <= 20 THEN total ELSE 0 END) / MAX(grand_total) * 100)::numeric, 2)
             FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY total DESC) AS rn FROM ranked_customers) r
             CROSS JOIN totals) AS top20_pct,
           (SELECT grand_total FROM totals) AS grand_total
@@ -213,8 +224,12 @@ export const sendDashboardEmail = async (
         [date],
       ),
 
-      // MTD vs Target by product — new: this is what powers the
-      // "MTD Target Achievement" section in the email.
+      // MTD vs Target by product — this is what powers the
+      // "MTD Target Achievement" section in the email. Mirrors
+      // salesController.ts's getMtdTargetByProduct: reads *_mtd_sales /
+      // *_target straight off sales_current for the single resolved date
+      // (a true snapshot metric, safe to sum directly since this handler
+      // only ever runs for one date, never a range).
       pool.query(
         `
         SELECT
@@ -251,113 +266,174 @@ export const sendDashboardEmail = async (
 
       // ── RSM / Region report — product-wise, EXCLUDING customer_type = 'D2R'.
       //
-      // Six products (PLC, PLC+, Powercrete, Holcim/PCC+OPC, HWP, HCG) unioned
-      // into one flat rowset tagged by `product`, then grouped by
-      // region + rsm_b2b_head. This mirrors the standalone report format:
-      // Region | RSM | Target | MTD Target | MTD Sales | Ach% MTD |
-      // Today's Sales | Ach% Today | Per Day Req | Reg/Day.
-      //
-      // MTD Target is derived as (monthly target / 30) * day-of-month —
-      // NOT stored directly, since the schema only has the full monthly
-      // target. "30" is a fixed calendar-day divisor and the multiplier
-      // is just the calendar day number of the report date ($1), so it
-      // doesn't depend on upload history being complete/unbroken.
+      // Fixed to match salesController.ts's getRsmRegionReport exactly:
+      //   1. Target comes from the dedicated sales_targets table (joined via
+      //      brand_product_map), NOT from sales_current's *_target columns —
+      //      those don't carry the Distributor+B2B/D2R split this report
+      //      needs, so reading them directly here would silently produce
+      //      different numbers than the dashboard's RSM/Region report.
+      //   2. region / customer_type are normalized (letters only, lowercased)
+      //      on both sides before grouping/joining, since raw spelling in
+      //      sales_current and sales_targets doesn't always match exactly.
+      //   3. days_in_month is derived from the actual resolved date's month
+      //      (28/29/30/31) instead of a hardcoded 30 — a fixed divisor of 30
+      //      overstates the daily target rate in 31-day months and
+      //      understates it in February.
+      //   4. Every ROUND(...) argument is cast to ::numeric explicitly —
+      //      EXTRACT() returns double precision, and Postgres's 2-argument
+      //      ROUND(value, decimals) only exists for numeric, so leaving any
+      //      double precision in the expression throws
+      //      "function round(double precision, integer) does not exist".
       pool.query(
         `
         WITH product_unpivot AS (
-          SELECT region, rsm_b2b_head AS rsm, upload_date, customer_type,
-                 'PLC' AS product, plc_target AS target, plc_mtd_sales AS mtd_sales, plc_yesterday AS yesterday
+          SELECT
+            region,
+            lower(regexp_replace(region, '[^a-zA-Z]', '', 'g')) AS region_norm,
+            rsm_b2b_head AS rsm, upload_date,
+            lower(regexp_replace(customer_type, '[^a-zA-Z]', '', 'g')) AS ctype_norm,
+            'PLC' AS product, plc_mtd_sales AS mtd_sales, plc_yesterday AS yesterday
           FROM sales_current
           UNION ALL
-          SELECT region, rsm_b2b_head, upload_date, customer_type,
-                 'PLC+', plc_plus_target, plc_plus_mtd_sales, plc_plus_yesterday
+          SELECT region, lower(regexp_replace(region, '[^a-zA-Z]', '', 'g')),
+                 rsm_b2b_head, upload_date,
+                 lower(regexp_replace(customer_type, '[^a-zA-Z]', '', 'g')),
+                 'PLC+', plc_plus_mtd_sales, plc_plus_yesterday
           FROM sales_current
           UNION ALL
-          SELECT region, rsm_b2b_head, upload_date, customer_type,
-                 'Powercrete', powercrete_target, powercrete_mtd_sales, powercrete_yesterday
+          SELECT region, lower(regexp_replace(region, '[^a-zA-Z]', '', 'g')),
+                 rsm_b2b_head, upload_date,
+                 lower(regexp_replace(customer_type, '[^a-zA-Z]', '', 'g')),
+                 'Powercrete', powercrete_mtd_sales, powercrete_yesterday
           FROM sales_current
           UNION ALL
-          SELECT region, rsm_b2b_head, upload_date, customer_type,
-                 'Holcim', pcc_opc_target, pcc_opc_mtd_sales, pcc_opc_yesterday
+          SELECT region, lower(regexp_replace(region, '[^a-zA-Z]', '', 'g')),
+                 rsm_b2b_head, upload_date,
+                 lower(regexp_replace(customer_type, '[^a-zA-Z]', '', 'g')),
+                 'Holcim', pcc_opc_mtd_sales, pcc_opc_yesterday
           FROM sales_current
           UNION ALL
-          SELECT region, rsm_b2b_head, upload_date, customer_type,
-                 'HWP', hwp_target, hwp_mtd_sales, hwp_yesterday
+          SELECT region, lower(regexp_replace(region, '[^a-zA-Z]', '', 'g')),
+                 rsm_b2b_head, upload_date,
+                 lower(regexp_replace(customer_type, '[^a-zA-Z]', '', 'g')),
+                 'HWP', hwp_mtd_sales, hwp_yesterday
           FROM sales_current
           UNION ALL
-          SELECT region, rsm_b2b_head, upload_date, customer_type,
-                 'HCG', hcg_target, hcg_mtd_sales, hcg_yesterday
+          SELECT region, lower(regexp_replace(region, '[^a-zA-Z]', '', 'g')),
+                 rsm_b2b_head, upload_date,
+                 lower(regexp_replace(customer_type, '[^a-zA-Z]', '', 'g')),
+                 'HCG', hcg_mtd_sales, hcg_yesterday
           FROM sales_current
         ),
         params AS (
-          SELECT EXTRACT(DAY FROM $1::date) AS day_of_month
-        ),
-        agg AS (
           SELECT
-            product, region, rsm,
-            SUM(target) AS target_sum,
+            date_trunc('month', $1::date)::date AS target_month,
+            EXTRACT(DAY FROM $1::date)::numeric AS day_of_month,
+            EXTRACT(DAY FROM (date_trunc('month', $1::date) + INTERVAL '1 month - 1 day'))::numeric AS days_in_month
+        ),
+        sales_agg AS (
+          SELECT
+            product, region_norm,
+            MIN(region) AS region_display,
+            rsm,
             SUM(mtd_sales) AS mtd_sales_sum,
             SUM(yesterday) AS yesterday_sum
           FROM product_unpivot
-          WHERE upload_date = $1 AND customer_type != 'D2R'
-          GROUP BY product, region, rsm
+          WHERE upload_date = $1
+            AND ctype_norm != 'd2r'
+          GROUP BY product, region_norm, rsm
+        ),
+        product_prefix_map (product, product_prefix) AS (
+          VALUES
+            ('PLC', 'plc'), ('PLC+', 'plc_plus'), ('Powercrete', 'powercrete'),
+            ('Holcim', 'pcc_opc'), ('HWP', 'hwp'), ('HCG', 'hcg')
+        ),
+        target_agg AS (
+          SELECT
+            ppm.product,
+            lower(regexp_replace(st.region, '[^a-zA-Z]', '', 'g')) AS region_norm,
+            SUM(st.target_value) AS target_sum
+          FROM sales_targets st
+          CROSS JOIN params p
+          JOIN brand_product_map bpm ON bpm.brand = st.brand
+          JOIN product_prefix_map ppm ON ppm.product_prefix = bpm.product_prefix
+          WHERE st.target_month = p.target_month
+            AND st.customer_type IN ('Distributor', 'B2B')
+          GROUP BY ppm.product, lower(regexp_replace(st.region, '[^a-zA-Z]', '', 'g'))
         )
         SELECT
-          a.product,
-          a.region,
-          a.rsm,
-          a.target_sum,
-          ROUND(a.target_sum / 30.0 * p.day_of_month, 2) AS mtd_target,
-          a.mtd_sales_sum,
-          ROUND(a.mtd_sales_sum / NULLIF(a.target_sum / 30.0 * p.day_of_month, 0), 4) AS ach_mtd,
-          a.yesterday_sum,
-          ROUND(a.yesterday_sum / NULLIF(a.target_sum / 30.0, 0), 4) AS ach_today,
-          ROUND((a.target_sum - a.mtd_sales_sum) / NULLIF(30 - p.day_of_month, 0), 2) AS per_day_req,
-          ROUND(a.mtd_sales_sum / NULLIF(p.day_of_month, 0), 2) AS reg_per_day
-        FROM agg a
+          s.product,
+          s.region_display AS region,
+          s.rsm,
+          t.target_sum,
+          ROUND((t.target_sum / p.days_in_month * p.day_of_month)::numeric, 2) AS mtd_target,
+          s.mtd_sales_sum,
+          ROUND((s.mtd_sales_sum / NULLIF(t.target_sum / p.days_in_month * p.day_of_month, 0))::numeric, 4) AS ach_mtd,
+          s.yesterday_sum,
+          ROUND((s.yesterday_sum / NULLIF(t.target_sum / p.days_in_month, 0))::numeric, 4) AS ach_today,
+          ROUND(((t.target_sum - s.mtd_sales_sum) / NULLIF(p.days_in_month - p.day_of_month, 0))::numeric, 2) AS per_day_req,
+          ROUND((s.mtd_sales_sum / NULLIF(p.day_of_month, 0))::numeric, 2) AS reg_per_day
+        FROM sales_agg s
+        LEFT JOIN target_agg t ON t.product = s.product AND t.region_norm = s.region_norm
         CROSS JOIN params p
-        ORDER BY a.product, a.region, a.rsm
+        ORDER BY s.product, s.region_display, s.rsm
       `,
         [date],
       ),
 
       // ── RSM / Region report — D2R, treated as one combined "product".
       //
-      // Unlike the per-product report above, D2R does NOT split out by
-      // individual product. Instead every product's target / mtd_sales /
-      // yesterday is summed together into a single combined figure per
-      // region + rsm_b2b_head, restricted to customer_type = 'D2R'.
-      // Same MTD Target formula as above: (target / 30) * day-of-month.
+      // Same fix as the product query above: target comes from
+      // sales_targets (customer_type = 'D2R', brand = 'Total'), region is
+      // normalized on both sides, days_in_month is derived from the actual
+      // month instead of hardcoded 30, and every ROUND(...) argument is
+      // cast to ::numeric.
       pool.query(
         `
         WITH totals AS (
           SELECT
-            region,
+            lower(regexp_replace(region, '[^a-zA-Z0-9]', '', 'g')) AS region_norm,
+            MIN(region) AS region_display,
             rsm_b2b_head AS rsm,
-            SUM(plc_target + plc_plus_target + powercrete_target + pcc_opc_target + hwp_target + hcg_target) AS target_sum,
             SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS mtd_sales_sum,
             SUM(plc_yesterday + plc_plus_yesterday + powercrete_yesterday + pcc_opc_yesterday + hwp_yesterday + hcg_yesterday) AS yesterday_sum
           FROM sales_current
-          WHERE upload_date = $1 AND customer_type = 'D2R'
-          GROUP BY region, rsm_b2b_head
+          WHERE upload_date = $1
+            AND lower(regexp_replace(customer_type, '[^a-zA-Z0-9]', '', 'g')) = 'd2r'
+          GROUP BY region_norm, rsm_b2b_head
         ),
         params AS (
-          SELECT EXTRACT(DAY FROM $1::date) AS day_of_month
+          SELECT
+            date_trunc('month', $1::date)::date AS target_month,
+            EXTRACT(DAY FROM $1::date)::numeric AS day_of_month,
+            EXTRACT(DAY FROM (date_trunc('month', $1::date) + INTERVAL '1 month - 1 day'))::numeric AS days_in_month
+        ),
+        target_agg AS (
+          SELECT
+            lower(regexp_replace(st.region, '[^a-zA-Z0-9]', '', 'g')) AS region_norm,
+            SUM(st.target_value) AS target_sum
+          FROM sales_targets st
+          CROSS JOIN params p
+          WHERE st.target_month = p.target_month
+            AND st.customer_type = 'D2R'
+            AND st.brand = 'Total'
+          GROUP BY lower(regexp_replace(st.region, '[^a-zA-Z0-9]', '', 'g'))
         )
         SELECT
-          t.region,
+          t.region_display AS region,
           t.rsm,
-          t.target_sum,
-          ROUND(t.target_sum / 30.0 * p.day_of_month, 2) AS mtd_target,
+          ta.target_sum,
+          ROUND((ta.target_sum / p.days_in_month * p.day_of_month)::numeric, 2) AS mtd_target,
           t.mtd_sales_sum,
-          ROUND(t.mtd_sales_sum / NULLIF(t.target_sum / 30.0 * p.day_of_month, 0), 4) AS ach_mtd,
+          ROUND((t.mtd_sales_sum / NULLIF(ta.target_sum / p.days_in_month * p.day_of_month, 0))::numeric, 4) AS ach_mtd,
           t.yesterday_sum,
-          ROUND(t.yesterday_sum / NULLIF(t.target_sum / 30.0, 0), 4) AS ach_today,
-          ROUND((t.target_sum - t.mtd_sales_sum) / NULLIF(30 - p.day_of_month, 0), 2) AS per_day_req,
-          ROUND(t.mtd_sales_sum / NULLIF(p.day_of_month, 0), 2) AS reg_per_day
+          ROUND((t.yesterday_sum / NULLIF(ta.target_sum / p.days_in_month, 0))::numeric, 4) AS ach_today,
+          ROUND(((ta.target_sum - t.mtd_sales_sum) / NULLIF(p.days_in_month - p.day_of_month, 0))::numeric, 2) AS per_day_req,
+          ROUND((t.mtd_sales_sum / NULLIF(p.day_of_month, 0))::numeric, 2) AS reg_per_day
         FROM totals t
+        LEFT JOIN target_agg ta ON ta.region_norm = t.region_norm
         CROSS JOIN params p
-        ORDER BY t.region, t.rsm
+        ORDER BY t.region_display, t.rsm
       `,
         [date],
       ),

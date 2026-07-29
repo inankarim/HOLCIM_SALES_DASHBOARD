@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { LoginPage } from "./pages/LoginPage";
 import { UploadPage } from "./pages/UploadPage";
+import { TargetUploadPage } from "./pages/targetUploadPage"
 import { DashboardPage } from "./pages/DashboardPage";
 import { DeepInsightsPage } from "./pages/DeepInsightsPage";
 import { AppHeader } from "./components/layout/AppHeader";
@@ -152,6 +153,16 @@ function AppRoutes() {
           <AdminRoute>
             <AppLayout>
               <UploadPage />
+            </AppLayout>
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/upload-targets"
+        element={
+          <AdminRoute>
+            <AppLayout>
+              <TargetUploadPage />
             </AppLayout>
           </AdminRoute>
         }

@@ -1,5 +1,6 @@
 """
-FastAPI microservice wrapping sales_summary_agent's merge engine.
+FastAPI microservice wrapping sales_summary_agent's merge engine, plus the
+standalone monthly Target upload endpoint (target_file_parser.py).
 
 Node/Express calls this over HTTP with the admin's two uploaded files;
 this service returns the merged, related (not stacked) dataset as JSON
@@ -17,13 +18,19 @@ Endpoints:
                                   two-file-upload flow)
     POST /api/merge           -> same inputs -> JSON {columns, rows, row_count} only
     POST /api/merge/xlsx      -> same inputs -> formatted Sales_Summary.xlsx binary only
+    POST /api/targets         -> {file, target_month} multipart -> JSON
+                                  {target_month, row_count, skipped_non_target_rows, rows}
+                                  — monthly Region/Area/Territory/TSM/Customer Type/Brand
+                                  target upload (single file), completely independent of
+                                  the sales merge engine above (see target_file_parser.py)
 """
 
 import tempfile
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
 from sales_summary_agent import (
@@ -34,6 +41,7 @@ from sales_summary_agent import (
     export_workbook,
     validate_required_columns,
 )
+from target_file_parser import TargetFileError, parse_target_file
 
 app = FastAPI(title="Sales Summary Merge Service", version="1.0")
 
@@ -193,4 +201,51 @@ async def merge_to_xlsx(
             filename="Sales_Summary.xlsx",
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             background=None,
+        )
+
+
+@app.post("/api/targets")
+async def upload_targets(
+    file: UploadFile = File(...),
+    target_month: str = Form(...),  # "YYYY-MM-01"
+) -> JSONResponse:
+    """Standalone monthly Target upload (single file) — completely separate
+    pipeline from the sales merge engine above (see target_file_parser.py).
+    """
+    try:
+        date.fromisoformat(target_month)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"target_month must be in 'YYYY-MM-01' format, got: {target_month!r}",
+        ) from exc
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        path = _save_upload(file, tmp_dir)
+
+        try:
+            parsed = parse_target_file(path)
+        except TargetFileError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Could not read the uploaded target file: {exc}",
+            ) from exc
+
+        # This version of parse_target_file no longer attaches target_month
+        # itself (it only takes `path`) — the file carries no month column,
+        # so app.py must attach the form-provided value here.
+        rows = parsed.rows.copy()
+        rows.insert(0, "target_month", target_month)
+        records = rows.astype(object).where(pd.notnull(rows), None).to_dict(orient="records")
+
+        return JSONResponse(
+            {
+                "target_month": target_month,
+                "row_count": len(records),
+                "skipped_non_target_rows": parsed.skipped_non_target_rows,
+                "rows": records,
+            }
         )

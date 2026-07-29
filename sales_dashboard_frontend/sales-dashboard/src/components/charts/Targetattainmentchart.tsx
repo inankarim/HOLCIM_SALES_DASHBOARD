@@ -56,32 +56,22 @@ export function TargetAttainmentChart({ filters }: Props) {
     setLoading(true);
     setError(null);
 
-    Promise.all([
-      salesApi.getMtdTargetByProduct(filters),
-      salesApi.getYesterdayByProduct(filters),
-    ])
-      .then(([mtdRes, yestRes]) => {
+    salesApi
+      .getMtdTargetByProduct(filters)
+      .then((mtdRes) => {
         const mtdData = mtdRes.data?.data || [];
-        const yestData = yestRes.data?.data || [];
-
-        // yesterday response is keyed by product name only (no `key`),
-        // so index it by normalized name to merge onto the mtd rows.
-        const yestByName = new Map(
-          yestData.map((p: any) => [normalize(p.name ?? ""), Number(p.value) || 0]),
-        );
 
         const merged: ProductRow[] = mtdData.map((p: any) => {
-          // Try the internal `key` first, fall back to the display `name` —
-          // getProductLabel/getProductColor both resolve any known short
-          // code, display name, or internal column name to the same product.
-          const identity = p.key ?? p.name;
+          // Normalize before resolving identity — keeps label/color lookup
+          // robust to casing/whitespace differences (e.g. "D2R" vs "d2r").
+          const identity = normalize(p.key ?? p.name ?? "");
           return {
             key: p.key,
             label: getProductLabel(identity) || p.name,
             color: getProductColor(identity),
             target: Number(p.target) || 0,
             mtd: Number(p.mtd_sales) || 0,
-            yesterday: yestByName.get(normalize(p.name ?? "")) ?? 0,
+            yesterday: Number(p.yesterday) || 0,
           };
         });
 

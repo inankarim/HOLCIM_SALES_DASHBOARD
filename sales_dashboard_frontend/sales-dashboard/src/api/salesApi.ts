@@ -192,7 +192,6 @@ export const salesApi = {
 
   // ── Email ───────────────────────────────────────────────────────────────────
 
-  // POST /api/email/send
   sendDashboardEmail: (payload: {
     to: string[]
     cc?: string
@@ -211,7 +210,7 @@ export const salesApi = {
   deleteEmailRecipient: (id: number) =>
     http.delete(`/api/email-recipients/${id}`),
 
-  // ── File upload ─────────────────────────────────────────────────────────────
+  // ── File upload (sales) ──────────────────────────────────────────────────────
 
   // POST /api/upload (multipart: file_a, file_b, upload_date)
   uploadFiles: async (fileA: File, fileB: File, uploadDate: string) => {
@@ -245,8 +244,46 @@ export const salesApi = {
     formData.append("file_a", fileA)
     formData.append("file_b", fileB)
     formData.append("upload_date", uploadDate)
-    return http.post("/api/upload", formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-    })
+    // Do NOT set Content-Type manually — axios/the browser must generate
+    // its own multipart boundary. Setting "multipart/form-data" here
+    // (with no boundary) overrides that and leaves the server unable to
+    // parse the body, since it explicitly declares a header when the
+    // browser has already decided to add it, and won't override it.
+    return http.post("/api/upload", formData)
+  },
+
+  checkTargetMonth: (targetMonth: string) =>
+    http.get<{ exists: boolean; row_count: number }>("/api/targets/check", {
+      params: { target_month: targetMonth },
+    }),
+
+  // ── File upload (monthly targets) ────────────────────────────────────────────
+
+  // POST /api/targets (multipart: file, target_month)
+  // Standalone from uploadFiles above — different backend pipeline
+  // (target_file_parser.py), different destination table (sales_targets).
+  uploadTargets: async (file: File, targetMonth: string) => {
+    const MAX_SIZE = 20 * 1024 * 1024 // 20 MB
+    const ALLOWED_EXT = [".xlsx", ".xls", ".csv"]
+
+    const lower = file.name.toLowerCase()
+    if (!ALLOWED_EXT.some((ext) => lower.endsWith(ext))) {
+      throw new Error("Only .xlsx, .xls, or .csv files are allowed.")
+    }
+    if (file.size > MAX_SIZE) {
+      throw new Error("File size must be under 20 MB.")
+    }
+    if (!/^\d{4}-\d{2}-01$/.test(targetMonth)) {
+      throw new Error("Invalid target month format. Use YYYY-MM-01.")
+    }
+
+    const formData = new FormData()
+    formData.append("file", file)
+    formData.append("target_month", targetMonth)
+    // Do NOT set Content-Type manually here — same reasoning as
+    // uploadFiles above. This was the actual cause of the 400: axios
+    // never got to attach the multipart boundary, so the server (multer)
+    // couldn't parse the body and req.file came back undefined.
+    return http.post("/api/targets", formData)
   },
 }
