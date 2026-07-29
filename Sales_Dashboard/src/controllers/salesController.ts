@@ -185,6 +185,44 @@ function buildFilters(
   const extra = filters.length ? " AND " + filters.join(" AND ") : "";
   return { extra, params };
 }
+
+// ─── Helper: fixed business order for region tables (not alphabetical) ──────
+// Some region-based reports (currently the RSM/Region report) need a fixed
+// display order rather than alphabetical or total-based ordering. Region
+// names are normalized (letters/digits only, lowercased) before matching so
+// minor formatting differences ("Non-Trade" vs "Non Trade") still line up,
+// the same approach used for region_norm elsewhere in this file. Any region
+// not found in REGION_ORDER sorts after all named regions, in the order it
+// was encountered.
+const REGION_ORDER = [
+  "Dhaka Metro",
+  "Dhaka Outer",
+  "Cumilla",
+  "Sylhet",
+  "Rajshahi",
+  "Khulna",
+  "Chattogram",
+  "Non Trade",
+];
+
+function normalizeRegionName(region: string): string {
+  return region.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+const REGION_ORDER_NORMALIZED = REGION_ORDER.map(normalizeRegionName);
+
+function regionSortIndex(region: string | null | undefined): number {
+  if (!region) return REGION_ORDER_NORMALIZED.length;
+  const idx = REGION_ORDER_NORMALIZED.indexOf(normalizeRegionName(region));
+  return idx === -1 ? REGION_ORDER_NORMALIZED.length : idx;
+}
+
+function sortByRegion<T extends { region: string }>(rows: T[]): T[] {
+  return [...rows].sort(
+    (a, b) => regionSortIndex(a.region) - regionSortIndex(b.region),
+  );
+}
+
 // filterOptions
 export const getFilterOptions = async (
   req: AuthRequest,
@@ -1642,6 +1680,10 @@ export const getDeepInsights = async (
 // which is what was producing the 500. Casting both EXTRACT(...) results to
 // ::numeric once, in the `params` CTE, fixes every downstream ROUND(...)
 // call in both the product query and the D2R query below.
+//
+// Region display order: rows are re-sorted after fetching into a fixed
+// business order (see REGION_ORDER / sortByRegion above) rather than the
+// alphabetical/region-as-fetched order the SQL naturally returns them in.
 export const getRsmRegionReport = async (
   req: AuthRequest,
   res: Response,
@@ -1834,38 +1876,42 @@ export const getRsmRegionReport = async (
       ([key, meta]) => ({
         product: meta.label,
         colorKey: meta.colorKey,
-        rows: productResult.rows
-          .filter((r: any) => r.product === key)
-          .map((r: any) => ({
-            region: r.region,
-            rsm: r.rsm,
-            target: Number(r.target_sum),
-            mtd_target: Number(r.mtd_target),
-            mtd_sales: Number(r.mtd_sales_sum),
-            ach_mtd: Number(r.ach_mtd),
-            todays_sales: Number(r.yesterday_sum),
-            ach_today: Number(r.ach_today),
-            per_day_req: Number(r.per_day_req),
-            reg_per_day: Number(r.reg_per_day),
-          })),
+        rows: sortByRegion(
+          productResult.rows
+            .filter((r: any) => r.product === key)
+            .map((r: any) => ({
+              region: r.region,
+              rsm: r.rsm,
+              target: Number(r.target_sum),
+              mtd_target: Number(r.mtd_target),
+              mtd_sales: Number(r.mtd_sales_sum),
+              ach_mtd: Number(r.ach_mtd),
+              todays_sales: Number(r.yesterday_sum),
+              ach_today: Number(r.ach_today),
+              per_day_req: Number(r.per_day_req),
+              reg_per_day: Number(r.reg_per_day),
+            })),
+        ),
       }),
     );
 
     rsmByProduct.push({
       product: "D2R",
       colorKey: "D2R",
-      rows: d2rResult.rows.map((r: any) => ({
-        region: r.region,
-        rsm: r.rsm,
-        target: Number(r.target_sum),
-        mtd_target: Number(r.mtd_target),
-        mtd_sales: Number(r.mtd_sales_sum),
-        ach_mtd: Number(r.ach_mtd),
-        todays_sales: Number(r.yesterday_sum),
-        ach_today: Number(r.ach_today),
-        per_day_req: Number(r.per_day_req),
-        reg_per_day: Number(r.reg_per_day),
-      })),
+      rows: sortByRegion(
+        d2rResult.rows.map((r: any) => ({
+          region: r.region,
+          rsm: r.rsm,
+          target: Number(r.target_sum),
+          mtd_target: Number(r.mtd_target),
+          mtd_sales: Number(r.mtd_sales_sum),
+          ach_mtd: Number(r.ach_mtd),
+          todays_sales: Number(r.yesterday_sum),
+          ach_today: Number(r.ach_today),
+          per_day_req: Number(r.per_day_req),
+          reg_per_day: Number(r.reg_per_day),
+        })),
+      ),
     });
 
     res.json({

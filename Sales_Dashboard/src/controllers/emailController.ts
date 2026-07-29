@@ -4,6 +4,52 @@ import { pool } from "../config/db";
 import { transporter } from "../config/email";
 import { buildDashboardEmail } from "../utils/emailTemplate";
 
+// ─── Helper: fixed business order for region tables (not alphabetical) ──────
+// Same convention as salesController.ts's getRsmRegionReport — the RSM/
+// Region tables in the email need a fixed display order rather than
+// whatever order the SQL groups them in. Region names are normalized
+// (letters/digits only, lowercased) before matching so minor formatting
+// differences ("Non-Trade" vs "Non Trade") still line up. Any region not
+// found in REGION_ORDER sorts after all named regions, in the order it
+// was encountered.
+const REGION_ORDER = [
+  "Dhaka Metro",
+  "Dhaka Outer",
+  "Cumilla",
+  "Sylhet",
+  "Rajshahi",
+  "Khulna",
+  "Chattogram",
+  "Non Trade",
+];
+
+function normalizeRegionName(region: string | null | undefined): string {
+  return (region || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+const REGION_ORDER_NORMALIZED = REGION_ORDER.map(normalizeRegionName);
+
+function regionSortIndex(region: string | null | undefined): number {
+  const idx = REGION_ORDER_NORMALIZED.indexOf(normalizeRegionName(region));
+  return idx === -1 ? REGION_ORDER_NORMALIZED.length : idx;
+}
+
+function sortByRegion<T extends { region: string }>(rows: T[]): T[] {
+  return [...rows].sort(
+    (a, b) => regionSortIndex(a.region) - regionSortIndex(b.region),
+  );
+}
+
+// ─── Helper: Chittagong / Chattogram exclusion for "Lowest Region" KPI ──────
+// Chittagong (a.k.a. Chattogram) should never be surfaced as the "Lowest
+// Region" KPI card — if it happens to be the worst-performing region for
+// the date, fall through to the next-lowest region that isn't Chittagong
+// instead. Matches on the normalized name so either spelling is caught.
+function isChittagong(region: string | null | undefined): boolean {
+  const norm = normalizeRegionName(region);
+  return norm === "chittagong" || norm === "chattogram";
+}
+
 export const sendDashboardEmail = async (
   req: AuthRequest,
   res: Response,
@@ -470,6 +516,17 @@ export const sendDashboardEmail = async (
       (a: any, b: any) => Number(b.total) - Number(a.total),
     );
 
+    // "Lowest Region" KPI card should never surface Chittagong/Chattogram —
+    // if it's the worst-performing region for the date, fall through to the
+    // next-lowest region that isn't Chittagong instead (same exclusion
+    // pattern used for lowest_customer above).
+    const regionsSortedExclChittagong = regionsSorted.filter(
+      (r: any) => !isChittagong(r.region),
+    );
+    const lowestRegionRow = regionsSortedExclChittagong.length
+      ? regionsSortedExclChittagong[regionsSortedExclChittagong.length - 1]
+      : regionsSorted[regionsSorted.length - 1];
+
     const kpi = {
       total_sales: totalSales,
       total_customers: Number(kpiRow.total_customers),
@@ -480,8 +537,8 @@ export const sendDashboardEmail = async (
         value: Number(regionsSorted[0]?.total),
       },
       lowest_region: {
-        name: regionsSorted[regionsSorted.length - 1]?.region,
-        value: Number(regionsSorted[regionsSorted.length - 1]?.total),
+        name: lowestRegionRow?.region,
+        value: Number(lowestRegionRow?.total),
       },
       top_product: { name: topProduct?.name, value: topProduct?.value },
       lowest_product: {
@@ -600,6 +657,11 @@ export const sendDashboardEmail = async (
     // above; `colorKey` maps to PRODUCT_COLORS in the template (note the
     // SQL product tag and the brand color key don't always match 1:1 —
     // Powercrete -> POW, Holcim -> HOLCIM — so this table bridges them).
+    //
+    // Region display order: rows are re-sorted after fetching into the
+    // fixed business order (see REGION_ORDER / sortByRegion above), the
+    // same convention as salesController.ts's getRsmRegionReport, instead
+    // of whatever order the SQL naturally groups them in.
     const RSM_PRODUCT_META: Record<
       string,
       { label: string; colorKey: string }
@@ -616,20 +678,22 @@ export const sendDashboardEmail = async (
       ([key, meta]) => ({
         product: meta.label,
         colorKey: meta.colorKey,
-        rows: rsmReportResult.rows
-          .filter((r: any) => r.product === key)
-          .map((r: any) => ({
-            region: r.region,
-            rsm: r.rsm,
-            target: Number(r.target_sum),
-            mtd_target: Number(r.mtd_target),
-            mtd_sales: Number(r.mtd_sales_sum),
-            ach_mtd: Number(r.ach_mtd),
-            todays_sales: Number(r.yesterday_sum),
-            ach_today: Number(r.ach_today),
-            per_day_req: Number(r.per_day_req),
-            reg_per_day: Number(r.reg_per_day),
-          })),
+        rows: sortByRegion(
+          rsmReportResult.rows
+            .filter((r: any) => r.product === key)
+            .map((r: any) => ({
+              region: r.region,
+              rsm: r.rsm,
+              target: Number(r.target_sum),
+              mtd_target: Number(r.mtd_target),
+              mtd_sales: Number(r.mtd_sales_sum),
+              ach_mtd: Number(r.ach_mtd),
+              todays_sales: Number(r.yesterday_sum),
+              ach_today: Number(r.ach_today),
+              per_day_req: Number(r.per_day_req),
+              reg_per_day: Number(r.reg_per_day),
+            })),
+        ),
       }),
     );
 
@@ -638,18 +702,20 @@ export const sendDashboardEmail = async (
     rsmByProduct.push({
       product: "D2R",
       colorKey: "D2R",
-      rows: rsmReportD2RResult.rows.map((r: any) => ({
-        region: r.region,
-        rsm: r.rsm,
-        target: Number(r.target_sum),
-        mtd_target: Number(r.mtd_target),
-        mtd_sales: Number(r.mtd_sales_sum),
-        ach_mtd: Number(r.ach_mtd),
-        todays_sales: Number(r.yesterday_sum),
-        ach_today: Number(r.ach_today),
-        per_day_req: Number(r.per_day_req),
-        reg_per_day: Number(r.reg_per_day),
-      })),
+      rows: sortByRegion(
+        rsmReportD2RResult.rows.map((r: any) => ({
+          region: r.region,
+          rsm: r.rsm,
+          target: Number(r.target_sum),
+          mtd_target: Number(r.mtd_target),
+          mtd_sales: Number(r.mtd_sales_sum),
+          ach_mtd: Number(r.ach_mtd),
+          todays_sales: Number(r.yesterday_sum),
+          ach_today: Number(r.ach_today),
+          per_day_req: Number(r.per_day_req),
+          reg_per_day: Number(r.reg_per_day),
+        })),
+      ),
     });
 
     // Build HTML — pass charts so template can embed them
