@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Only the runtime app + the merge engine it imports — diagnose_duplicates.py
 # and verify_merge.py are dev-only CLI tools, not needed in the image.
-COPY app.py sales_summary_agent.py ./
+COPY app.py sales_summary_agent.py target_file_parser.py ./
 
 EXPOSE 8000
 
