@@ -95,6 +95,12 @@ export const sendDashboardEmail = async (
     //     since it's a cumulative-as-of-upload snapshot, not a daily figure.
     //     The result is still aliased as `${key}_mtd_sales` so downstream
     //     field names / the email template stay unchanged.
+    //     EXCEPTION: top5_customers (below) intentionally sums *_mtd_sales
+    //     instead, so "Top 5 Customers" reflects cumulative month-to-date
+    //     volume rather than a single day's sales. Every other deep-insight
+    //     metric (bottom TSM/TSE, bottom ASM/KAM, bottom territories,
+    //     concentration %) still ranks off the daily *_yesterday figure, so
+    //     this section now intentionally mixes MTD and daily bases.
     //   - *_mtd_sales / *_target: the true cumulative MTD-vs-target snapshot.
     //     Only the "MTD vs Target by product" query below is meant to read
     //     these columns directly.
@@ -216,7 +222,12 @@ export const sendDashboardEmail = async (
       ),
 
       // Deep Insights
-      // Same rule as Insights above — *_yesterday, never *_mtd_sales.
+      // bottom5_tsm / bottom5_asm / top5_customers all rank on *_mtd_sales
+      // (cumulative month-to-date), not the daily *_yesterday delta — a
+      // single bad/good day for a TSM or ASM/KAM shouldn't flip who shows
+      // up here. bottom5_territories and the concentration % (top5/10/20_pct)
+      // still rank off the daily *_yesterday figure, so this section
+      // intentionally mixes MTD and daily bases across its sub-queries.
       pool.query(
         `
         WITH totals AS (
@@ -229,15 +240,19 @@ export const sendDashboardEmail = async (
         )
         SELECT
           (SELECT JSON_AGG(r) FROM (
-            SELECT tsm_tse, COUNT(DISTINCT customer_name) AS customers,
-              SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) AS total
+            SELECT tsm_tse,
+              ARRAY_AGG(DISTINCT territory) AS territories,
+              COUNT(DISTINCT customer_name) AS customers,
+              SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) AS total
             FROM sales_current WHERE upload_date = $1
             AND tsm_tse NOT ILIKE '%vacant%' AND tsm_tse != ''
             GROUP BY tsm_tse ORDER BY total ASC LIMIT 5
           ) r) AS bottom5_tsm,
           (SELECT JSON_AGG(r) FROM (
-            SELECT asm_kam, COUNT(DISTINCT customer_name) AS customers,
-              SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) AS total
+            SELECT asm_kam,
+              ARRAY_AGG(DISTINCT area) AS areas,
+              COUNT(DISTINCT customer_name) AS customers,
+              SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) AS total
             FROM sales_current WHERE upload_date = $1
             AND asm_kam != ''
             GROUP BY asm_kam ORDER BY total ASC LIMIT 5
@@ -251,7 +266,7 @@ export const sendDashboardEmail = async (
           ) r) AS bottom5_territories,
           (SELECT JSON_AGG(r) FROM (
             SELECT customer_name, region, area, territory, tsm_tse,
-              SUM(plc_yesterday+plc_plus_yesterday+powercrete_yesterday+pcc_opc_yesterday+hwp_yesterday+hcg_yesterday) AS total
+              SUM(plc_mtd_sales+plc_plus_mtd_sales+powercrete_mtd_sales+pcc_opc_mtd_sales+hwp_mtd_sales+hcg_mtd_sales) AS total
             FROM sales_current WHERE upload_date = $1
             GROUP BY customer_name, region, area, territory, tsm_tse
             ORDER BY total DESC LIMIT 5
@@ -297,15 +312,36 @@ export const sendDashboardEmail = async (
       // it only ever showed 5 rows and duplicated the Bottom Performers
       // section below it. This is a real, independent area-level rollup
       // of every area for the date, sorted best-to-worst.
+      //
+      // FIX: the previous version of this query had two SQL bugs that
+      // made it fail on every call:
+      //   1. `AS customer_d-1_sales` used a bare hyphen inside an
+      //      unquoted identifier, which Postgres parses as
+      //      "customer_d - 1_sales" (a subtraction) — a syntax error.
+      //      Renamed to `customer_d1_sales` (no hyphen).
+      //   2. The outer SELECT referenced `SUM(customer_target)`, but
+      //      `customer_target` was never computed in the `per_customer`
+      //      CTE (sales_current has no per-row target column to sum
+      //      here), so this raised "column customer_target does not
+      //      exist". It's removed — `allAreas` downstream never reads a
+      //      `target` field anyway.
       pool.query(
         `
-        SELECT area, region,
-          COUNT(DISTINCT customer_name) AS customers,
-          SUM(plc_yesterday + plc_plus_yesterday + powercrete_yesterday + pcc_opc_yesterday + hwp_yesterday + hcg_yesterday) AS total
-        FROM sales_current
-        WHERE upload_date = $1
-        GROUP BY area, region
-        ORDER BY total DESC
+        WITH per_customer AS (
+          SELECT area, asm_kam, customer_name,
+            SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) AS customer_mtd_sales,
+            SUM(plc_yesterday + plc_plus_yesterday + powercrete_yesterday + pcc_opc_yesterday + hwp_yesterday + hcg_yesterday) AS customer_d1_sales
+          FROM sales_current
+          WHERE upload_date = $1
+          GROUP BY area, asm_kam, customer_name
+        )
+        SELECT area, asm_kam,
+          COUNT(DISTINCT customer_name) FILTER (WHERE customer_mtd_sales > 0) AS customers,
+          SUM(customer_mtd_sales) AS mtd_sales,
+          SUM(customer_d1_sales) AS d1_sales
+        FROM per_customer
+        GROUP BY area, asm_kam
+        ORDER BY d1_sales DESC
       `,
         [date],
       ),
@@ -647,9 +683,10 @@ export const sendDashboardEmail = async (
     // section (all rows) and the written "Top 5 Areas" table that follows it.
     const allAreas = areaResult.rows.map((r: any) => ({
       area: r.area,
-      region: r.region,
+      asm_kam: r.asm_kam,
       customers: Number(r.customers),
-      total: Number(r.total),
+      mtd_sales: Number(r.mtd_sales),
+      d1_sales: Number(r.d1_sales),
     }));
 
     // RSM / Region report — group the flat rowset into 6 per-product

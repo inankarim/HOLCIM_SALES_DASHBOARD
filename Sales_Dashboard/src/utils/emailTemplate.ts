@@ -139,6 +139,7 @@ export function buildDashboardEmail(data: {
       (r: any, i: number) => `
       <tr class="dts bad" style="background:${i % 2 === 0 ? "#fff5f5" : "#ffffff"}">
         <td>${r.tsm_tse}</td>
+        <td>${(r.territories || []).join(", ")}</td>
         <td class="c">${r.customers}</td>
         <td class="r total">${formatNum(Number(r.total))}</td>
       </tr>`,
@@ -150,18 +151,7 @@ export function buildDashboardEmail(data: {
       (r: any, i: number) => `
       <tr class="dts bad" style="background:${i % 2 === 0 ? "#fff5f5" : "#ffffff"}">
         <td>${r.asm_kam}</td>
-        <td class="c">${r.customers}</td>
-        <td class="r total">${formatNum(Number(r.total))}</td>
-      </tr>`,
-    )
-    .join("");
-
-  const bottom5TerRows = (deepInsights?.failures?.bottom5_territories || [])
-    .map(
-      (r: any, i: number) => `
-      <tr class="dts bad" style="background:${i % 2 === 0 ? "#fff5f5" : "#ffffff"}">
-        <td>${r.territory}</td>
-        <td>${r.region}</td>
+        <td>${(r.areas || []).join(", ")}</td>
         <td class="c">${r.customers}</td>
         <td class="r total">${formatNum(Number(r.total))}</td>
       </tr>`,
@@ -189,29 +179,13 @@ export function buildDashboardEmail(data: {
       (r: any, i: number) => `
       <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"}">
         <td>${r.area}</td>
-        <td>${r.region}</td>
+        <td>${r.asm_kam}</td>
         <td class="c">${r.customers}</td>
-        <td class="r total">${formatNum(Number(r.total))}</td>
+        <td class="r">${formatNum(r.mtd_sales)}</td>
+        <td class="r total">${formatNum(r.d1_sales)}</td>
       </tr>`,
     )
     .join("");
-
-  // Top 5 areas — written out as a real table (not just left to the chart
-  // image) so it reads correctly even for recipients whose mail client
-  // blocks images.
-  const top5AreaRows = allAreas
-    .slice(0, 5)
-    .map(
-      (r: any, i: number) => `
-      <tr class="dts good" style="background:${i % 2 === 0 ? "#f0fdf4" : "#ffffff"}">
-        <td>${r.area}</td>
-        <td>${r.region}</td>
-        <td class="c">${r.customers}</td>
-        <td class="r total">${formatNum(Number(r.total))}</td>
-      </tr>`,
-    )
-    .join("");
-
   const mtdTargetRows = (mtdTarget?.data || [])
     .map((p: any) => {
       const pct = Number(p.achievement_pct) || 0;
@@ -293,6 +267,59 @@ export function buildDashboardEmail(data: {
       })
       .join("");
 
+    // ── Grand Total row ──────────────────────────────────────────
+    // Target / MTD Target / MTD Sales / Today's Sales / Per Day Req /
+    // Reg-Per-Day are all additive across regions, so they're summed
+    // directly. The two Ach% columns are NOT averaged from the per-row
+    // percentages (that would over/under-weight small regions) — they're
+    // re-derived from the summed absolute values instead:
+    //   ach_mtd   = total_mtd_sales / total_mtd_target
+    //   ach_today = total_todays_sales / (total_mtd_target / day_of_month)
+    // The second identity comes straight from how the SQL built mtd_target
+    // in the first place (mtd_target = target/days_in_month*day_of_month,
+    // so target/days_in_month == mtd_target/day_of_month) — so the total
+    // can be derived from `date` alone without needing days_in_month here.
+    const dayOfMonth = Number(date.split("-")[2]) || 1;
+    const sumField = (key: string) =>
+      group.rows.reduce((s, r) => s + (Number(r[key]) || 0), 0);
+    const totalTarget = sumField("target");
+    const totalMtdTarget = sumField("mtd_target");
+    const totalMtdSales = sumField("mtd_sales");
+    const totalTodaysSales = sumField("todays_sales");
+    const totalPerDayReq = sumField("per_day_req");
+    const totalRegPerDay = sumField("reg_per_day");
+    const totalAchMtdPct = totalMtdTarget
+      ? (totalMtdSales / totalMtdTarget) * 100
+      : 0;
+    const totalAchTodayPct = totalMtdTarget
+      ? (totalTodaysSales / (totalMtdTarget / dayOfMonth)) * 100
+      : 0;
+    const totalAchMtdColor =
+      totalAchMtdPct >= 100
+        ? "#16a34a"
+        : totalAchMtdPct >= 75
+          ? "#f59e0b"
+          : "#dc2626";
+    const totalAchTodayColor =
+      totalAchTodayPct >= 100
+        ? "#16a34a"
+        : totalAchTodayPct >= 75
+          ? "#f59e0b"
+          : "#dc2626";
+
+    const totalRow = `
+        <tr style="background:#eef2f7;border-top:2px solid #cbd5e1">
+          <td class="total" colspan="2">Grand Total</td>
+          <td class="r total">${formatNum(totalTarget)}</td>
+          <td class="r total">${formatNum(totalMtdTarget)}</td>
+          <td class="r total">${formatNum(totalMtdSales)}</td>
+          <td class="r total" style="color:${totalAchMtdColor}">${totalAchMtdPct.toFixed(1)}%</td>
+          <td class="r total">${formatNum(totalTodaysSales)}</td>
+          <td class="r total" style="color:${totalAchTodayColor}">${totalAchTodayPct.toFixed(1)}%</td>
+          <td class="r total">${formatNum(totalPerDayReq)}</td>
+          <td class="r total">${formatNum(totalRegPerDay)}</td>
+        </tr>`;
+
     return `
     <div class="section-card">
       <div class="section-title">📋 ${group.product} — RSM / Region</div>
@@ -313,7 +340,7 @@ export function buildDashboardEmail(data: {
               <th class="r">Reg/Day</th>
             </tr>
           </thead>
-          <tbody>${rows}</tbody>
+          <tbody>${rows}${totalRow}</tbody>
         </table>
       </div>
     </div>`;
@@ -791,42 +818,18 @@ export function buildDashboardEmail(data: {
     ${rsmTablesHtml}
 
     <!-- ═══ 9. AREA PERFORMANCE TABLE (all areas) ═══ -->
-    <div class="section-card">
-      <div class="section-title" style="margin-bottom:4px">📍 Area Performance — All Areas</div>
-      <div class="swipe-hint">Swipe left to see all columns →</div>
-      <div class="chart-scroll" style="border:none">
-        <table class="dt" cellpadding="0" cellspacing="0" style="width:100%;min-width:420px">
+    <table class="dt" cellpadding="0" cellspacing="0" style="width:100%;min-width:480px">
           <thead>
             <tr style="background:linear-gradient(to right,#94C12E,#10BBE1,#1D4370)">
               <th class="l">Area</th>
-              <th class="l">Region</th>
+              <th class="l">ASM/KAM</th>
               <th class="c">Customers</th>
-              <th class="r">Total Sales</th>
+              <th class="r">MTD Sales</th>
+              <th class="r">D-1 Sales</th>
             </tr>
           </thead>
           <tbody>${areaRows}</tbody>
         </table>
-      </div>
-    </div>
-
-    <!-- ═══ 9b. TOP 5 AREAS (written table, not just the chart) ═══ -->
-    <div class="section-card">
-      <div class="section-title" style="color:#16a34a">🏆 Top 5 Areas</div>
-      <div class="chart-scroll" style="border:none">
-        <table class="dts good" cellpadding="0" cellspacing="0" style="width:100%;min-width:380px">
-          <thead>
-            <tr style="background:#f0fdf4">
-              <th class="l">Area</th>
-              <th class="l">Region</th>
-              <th class="c">Customers</th>
-              <th class="r">Total Sales</th>
-            </tr>
-          </thead>
-          <tbody>${top5AreaRows}</tbody>
-        </table>
-      </div>
-    </div>
-
     <!-- ═══ 10. AREA PERFORMANCE CHART ═══ -->
     ${renderChart(areaChart, {
       label: "Area Performance Chart",
@@ -854,12 +857,13 @@ export function buildDashboardEmail(data: {
 
       <div style="font-size:12px;font-weight:700;color:#dc2626;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;padding-bottom:4px;border-bottom:2px solid #fee2e2">Bottom 5 TSM / TSE</div>
       <div class="chart-scroll" style="border:none;margin-bottom:20px">
-        <table class="dts bad" cellpadding="0" cellspacing="0" style="width:100%;min-width:320px">
+        <table class="dts bad" cellpadding="0" cellspacing="0" style="width:100%;min-width:440px">
           <thead>
             <tr style="background:#fef2f2">
               <th class="l">TSM/TSE</th>
+              <th class="l">Territory</th>
               <th class="c" style="text-align:center">Customers</th>
-              <th class="r" style="text-align:right">Total Sales</th>
+              <th class="r" style="text-align:right">MTD Sales</th>
             </tr>
           </thead>
           <tbody>${bottom5TsmRows}</tbody>
@@ -868,30 +872,16 @@ export function buildDashboardEmail(data: {
 
       <div style="font-size:12px;font-weight:700;color:#dc2626;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;padding-bottom:4px;border-bottom:2px solid #fee2e2">Bottom 5 ASM / KAM</div>
       <div class="chart-scroll" style="border:none;margin-bottom:20px">
-        <table class="dts bad" cellpadding="0" cellspacing="0" style="width:100%;min-width:320px">
+        <table class="dts bad" cellpadding="0" cellspacing="0" style="width:100%;min-width:440px">
           <thead>
             <tr style="background:#fef2f2">
               <th class="l">ASM/KAM</th>
+              <th class="l">Area</th>
               <th class="c" style="text-align:center">Customers</th>
-              <th class="r" style="text-align:right">Total Sales</th>
+              <th class="r" style="text-align:right">MTD Sales</th>
             </tr>
           </thead>
           <tbody>${bottom5AsmRows}</tbody>
-        </table>
-      </div>
-
-      <div style="font-size:12px;font-weight:700;color:#dc2626;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;padding-bottom:4px;border-bottom:2px solid #fee2e2">Bottom 5 Territories</div>
-      <div class="chart-scroll" style="border:none">
-        <table class="dts bad" cellpadding="0" cellspacing="0" style="width:100%;min-width:380px">
-          <thead>
-            <tr style="background:#fef2f2">
-              <th class="l">Territory</th>
-              <th class="l">Region</th>
-              <th class="c" style="text-align:center">Customers</th>
-              <th class="r" style="text-align:right">Total Sales</th>
-            </tr>
-          </thead>
-          <tbody>${bottom5TerRows}</tbody>
         </table>
       </div>
     </div>
@@ -906,7 +896,7 @@ export function buildDashboardEmail(data: {
               <th class="l">Customer</th>
               <th class="l">Region</th>
               <th class="l">Territory</th>
-              <th class="r" style="text-align:right">Total Sales</th>
+              <th class="r" style="text-align:right">MTD Sales</th>
             </tr>
           </thead>
           <tbody>${top5CustomerRows}</tbody>

@@ -24,7 +24,13 @@ export const verifyToken = (
   const token = authHeader.split(" ")[1];
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as {
+    // Pin the allowed algorithm explicitly. jsonwebtoken currently infers
+    // HS256 for a string secret, but pinning it here means a future change
+    // to the signing key (e.g. switching to RSA) can't silently open up
+    // algorithm-confusion attacks without someone also updating this line.
+    const decoded = jwt.verify(token, process.env.JWT_SECRET as string, {
+      algorithms: ["HS256"],
+    }) as {
       id: number;
       email: string;
       role: string;

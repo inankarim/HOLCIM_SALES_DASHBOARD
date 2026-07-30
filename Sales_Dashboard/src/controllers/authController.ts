@@ -57,6 +57,14 @@ export const loginValidation = [
     .withMessage("Invalid password"),
 ];
 
+// Precomputed bcrypt hash of a random value, used ONLY to burn roughly the
+// same amount of CPU time as a real bcrypt.compare when the email doesn't
+// exist. This closes the timing side-channel that would otherwise let an
+// attacker distinguish "no such user" (fast path) from "wrong password"
+// (slow path, because bcrypt.compare ran) and enumerate valid emails.
+const DUMMY_HASH =
+  "$2a$12$CwTycUXWue0Thq9StjUM0uJ8jGCCg6Yy8XHqPqEg.EhKD7ZS.rDLu"; // hash of a random 32-char string, never a real password
+
 export const register = async (req: Request, res: Response): Promise<void> => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -106,13 +114,16 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 
     const user = result.rows[0];
 
-    if (!user) {
-      res.status(401).json({ error: "Invalid email or password" });
-      return;
-    }
+    // Always run a bcrypt.compare, whether or not the user exists, so the
+    // response time doesn't reveal which emails are registered. Compare
+    // against the real hash if we have a user, otherwise against a dummy
+    // hash — the CPU cost is the same either way.
+    const match = await bcrypt.compare(
+      password,
+      user ? user.password : DUMMY_HASH,
+    );
 
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) {
+    if (!user || !match) {
       res.status(401).json({ error: "Invalid email or password" });
       return;
     }
@@ -124,7 +135,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
       secret,
-      { expiresIn: "1d" },
+      { expiresIn: "1d", algorithm: "HS256" },
     );
 
     res.json({
