@@ -38,6 +38,27 @@ export function buildDashboardEmail(data: {
       return Math.round(value).toLocaleString() + " MT";
     }
   };
+  // Target is month-specific and MTD Target/Sales are as-of a specific
+  // date, so the RSM/Region table headers need to show which month/date
+  // they refer to rather than a bare "Target" that silently changes
+  // meaning every month.
+  const MONTH_NAMES = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+  const [rptYear, rptMonth, rptDay] = date.split("-").map(Number);
+  const targetMonthLabel = `${MONTH_NAMES[rptMonth - 1]} ${rptYear}`;
+  const asOfDateLabel = `${String(rptDay).padStart(2, "0")}.${String(rptMonth).padStart(2, "0")}.${rptYear}`;
 
   // Helper: find chart by name keyword
   const getChart = (keyword: string) =>
@@ -106,24 +127,22 @@ export function buildDashboardEmail(data: {
   // ────────────────────────────────────────────────────────────────
 
   const regionRows = byRegion
-    .sort((a, b) => b.total - a.total)
     .map(
       (r, i) => `
       <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"}">
         <td>${r.region}</td>
         <td class="r">${formatNum(r.plc)}</td>
         <td class="r">${formatNum(r.plc_plus)}</td>
-        <td class="r">${formatNum(r.pow)}</td>
         <td class="r">${formatNum(r.holcim_ss)}</td>
         <td class="r">${formatNum(r.hwp)}</td>
         <td class="r">${formatNum(r.hcg)}</td>
+         <td class="r">${formatNum(r.pow)}</td>
         <td class="r total">${formatNum(r.total)}</td>
       </tr>`,
     )
     .join("");
 
   const productRows = byProduct
-    .sort((a, b) => b.value - a.value)
     .map(
       (p, i) => `
       <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"}">
@@ -261,38 +280,33 @@ export function buildDashboardEmail(data: {
           <td class="r" style="font-weight:700;color:${achMtdColor}">${achMtdPct.toFixed(1)}%</td>
           <td class="r">${formatNum(r.todays_sales)}</td>
           <td class="r" style="font-weight:700;color:${achTodayColor}">${achTodayPct.toFixed(1)}%</td>
-          <td class="r">${formatNum(r.per_day_req)}</td>
-          <td class="r">${formatNum(r.reg_per_day)}</td>
+          <td class="r">${formatNum(r.avg_per_day)}</td>
+          <td class="r">${formatNum(r.req_per_day)}</td>
         </tr>`;
       })
       .join("");
 
     // ── Grand Total row ──────────────────────────────────────────
-    // Target / MTD Target / MTD Sales / Today's Sales / Per Day Req /
-    // Reg-Per-Day are all additive across regions, so they're summed
+    // Target / MTD Target / MTD Sales / Today's Sales / Avg-Per-Day /
+    // Req-Per-Day are all additive across regions, so they're summed
     // directly. The two Ach% columns are NOT averaged from the per-row
     // percentages (that would over/under-weight small regions) — they're
     // re-derived from the summed absolute values instead:
     //   ach_mtd   = total_mtd_sales / total_mtd_target
-    //   ach_today = total_todays_sales / (total_mtd_target / day_of_month)
-    // The second identity comes straight from how the SQL built mtd_target
-    // in the first place (mtd_target = target/days_in_month*day_of_month,
-    // so target/days_in_month == mtd_target/day_of_month) — so the total
-    // can be derived from `date` alone without needing days_in_month here.
-    const dayOfMonth = Number(date.split("-")[2]) || 1;
+    //   ach_today = total_mtd_sales / total_target
     const sumField = (key: string) =>
       group.rows.reduce((s, r) => s + (Number(r[key]) || 0), 0);
     const totalTarget = sumField("target");
     const totalMtdTarget = sumField("mtd_target");
     const totalMtdSales = sumField("mtd_sales");
     const totalTodaysSales = sumField("todays_sales");
-    const totalPerDayReq = sumField("per_day_req");
-    const totalRegPerDay = sumField("reg_per_day");
+    const totalAvgPerDay = sumField("avg_per_day");
+    const totalReqPerDay = sumField("req_per_day");
     const totalAchMtdPct = totalMtdTarget
       ? (totalMtdSales / totalMtdTarget) * 100
       : 0;
-    const totalAchTodayPct = totalMtdTarget
-      ? (totalTodaysSales / (totalMtdTarget / dayOfMonth)) * 100
+    const totalAchTodayPct = totalTarget
+      ? (totalMtdSales / totalTarget) * 100
       : 0;
     const totalAchMtdColor =
       totalAchMtdPct >= 100
@@ -316,8 +330,8 @@ export function buildDashboardEmail(data: {
           <td class="r total" style="color:${totalAchMtdColor}">${totalAchMtdPct.toFixed(1)}%</td>
           <td class="r total">${formatNum(totalTodaysSales)}</td>
           <td class="r total" style="color:${totalAchTodayColor}">${totalAchTodayPct.toFixed(1)}%</td>
-          <td class="r total">${formatNum(totalPerDayReq)}</td>
-          <td class="r total">${formatNum(totalRegPerDay)}</td>
+          <td class="r total">${formatNum(totalAvgPerDay)}</td>
+          <td class="r total">${formatNum(totalReqPerDay)}</td>
         </tr>`;
 
     return `
@@ -330,14 +344,14 @@ export function buildDashboardEmail(data: {
             <tr style="background:${headerColor}">
               <th class="l">Region</th>
               <th class="l">RSM</th>
-              <th class="r">Target</th>
-              <th class="r">MTD Target</th>
-              <th class="r">MTD Sales</th>
+              <th class="r">Target (${targetMonthLabel})</th>
+              <th class="r">MTD Target (${asOfDateLabel})</th>
+              <th class="r">MTD Sales (${asOfDateLabel})</th>
               <th class="r">Ach % (MTD Target)</th>
               <th class="r">Today's Sales</th>
               <th class="r">Ach % (SALES Target)</th>
-              <th class="r">Per Day Req</th>
-              <th class="r">Reg/Day</th>
+              <th class="r">Per day Avg Sales</th>
+              <th class="r">Req/Day</th>
             </tr>
           </thead>
           <tbody>${rows}${totalRow}</tbody>
@@ -637,20 +651,26 @@ export function buildDashboardEmail(data: {
           </div>
         </td>
         <td class="kpi-cell" width="25%" style="padding:4px">
+          <div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0;border-left:4px solid #14b8a6">
+            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">Active Customers</div>
+            <div class="kpi-value" style="font-size:24px;font-weight:700;color:#14b8a6;margin-top:4px">${kpi?.active_customers?.toLocaleString()}</div>
+            <div style="font-size:11px;color:#64748b">of ${kpi?.total_customers?.toLocaleString()}
+          </div>
+        </td>
+        <td class="kpi-cell" width="25%" style="padding:4px">
           <div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0;border-left:4px solid #f59e0b">
             <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">Total Territories</div>
             <div class="kpi-value" style="font-size:24px;font-weight:700;color:#f59e0b;margin-top:4px">${kpi?.total_territories}</div>
           </div>
         </td>
-
-        <td class="kpi-cell" width="25%" style="padding:4px">
+      </tr>
+      <tr>
+       <td class="kpi-cell" width="25%" style="padding:4px">
           <div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0;border-left:4px solid #8b5cf6">
             <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">Avg / Customer</div>
             <div class="kpi-value" style="font-size:24px;font-weight:700;color:#8b5cf6;margin-top:4px">${formatNum(kpi?.avg_per_customer)}</div>
           </div>
         </td>
-      </tr>
-      <tr>
         <td class="kpi-cell" width="25%" style="padding:4px">
           <div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0;border-left:4px solid #10b981">
             <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">Top Region</div>
@@ -672,13 +692,15 @@ export function buildDashboardEmail(data: {
             <div style="font-size:11px;color:#64748b">${formatNum(kpi?.top_product?.value)}</div>
           </div>
         </td>
-        <td class="kpi-cell" width="25%" style="padding:4px">
+      </tr>
+      <tr>
+      <td class="kpi-cell" width="25%" style="padding:4px">
           <div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0;border-left:4px solid #ef4444">
             <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">Lowest Product</div>
             <div style="font-size:18px;font-weight:700;color:#ef4444;margin-top:4px">${kpi?.lowest_product?.name}</div>
             <div style="font-size:11px;color:#64748b">${formatNum(kpi?.lowest_product?.value)}</div>
           </div>
-        </td>
+      </td>
       </tr>
     </table>
 

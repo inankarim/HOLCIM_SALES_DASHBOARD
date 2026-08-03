@@ -117,6 +117,7 @@ export const sendDashboardEmail = async (
     // report can't drift from what the dashboard shows.
     const [
       kpiResult,
+      activeCustomersResult,
       regionResult,
       productResult,
       insightsResult,
@@ -130,6 +131,12 @@ export const sendDashboardEmail = async (
       // Actual sales for the date — sum the *_yesterday deltas (never the
       // *_mtd_sales cumulative snapshot), collapsed to one row per customer
       // first so avg_per_customer is a true per-customer average.
+      //
+      // NOTE: avg_per_customer is no longer read off this query — it's
+      // computed downstream as total_sales / active_customers (see
+      // activeCustomersResult below), not divided by total_customers.
+      // The column stays here (harmless, just unused) rather than
+      // stripping the query apart.
       pool.query(
         `
         WITH per_customer AS (
@@ -147,6 +154,26 @@ export const sendDashboardEmail = async (
           COUNT(DISTINCT territory) AS total_territories,
           COALESCE(AVG(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales), 0) AS avg_per_customer
         FROM per_customer
+      `,
+        [date],
+      ),
+
+      // Active Customers — counts sap_ids whose TRUE cumulative MTD sales
+      // (the real *_mtd_sales snapshot columns, not the *_yesterday daily
+      // delta used by kpiResult above) is greater than zero. Grouped by
+      // sap_id only, summed across every row for that sap_id (covers the
+      // sub-distributor case where one sap_id has multiple customer_name
+      // rows for the same date).
+      pool.query(
+        `
+        SELECT COUNT(*) AS active_customers
+        FROM (
+          SELECT sap_id
+          FROM sales_current
+          WHERE upload_date = $1
+          GROUP BY sap_id
+          HAVING SUM(plc_mtd_sales + plc_plus_mtd_sales + powercrete_mtd_sales + pcc_opc_mtd_sales + hwp_mtd_sales + hcg_mtd_sales) > 0
+        ) active
       `,
         [date],
       ),
@@ -307,24 +334,6 @@ export const sendDashboardEmail = async (
       ),
 
       // ── All areas (no LIMIT) — powers the "Area Performance" section.
-      // Previously this section reused deepInsights' bottom5_territories
-      // data (limited to 5 worst-performing territories), which is why
-      // it only ever showed 5 rows and duplicated the Bottom Performers
-      // section below it. This is a real, independent area-level rollup
-      // of every area for the date, sorted best-to-worst.
-      //
-      // FIX: the previous version of this query had two SQL bugs that
-      // made it fail on every call:
-      //   1. `AS customer_d-1_sales` used a bare hyphen inside an
-      //      unquoted identifier, which Postgres parses as
-      //      "customer_d - 1_sales" (a subtraction) — a syntax error.
-      //      Renamed to `customer_d1_sales` (no hyphen).
-      //   2. The outer SELECT referenced `SUM(customer_target)`, but
-      //      `customer_target` was never computed in the `per_customer`
-      //      CTE (sales_current has no per-row target column to sum
-      //      here), so this raised "column customer_target does not
-      //      exist". It's removed — `allAreas` downstream never reads a
-      //      `target` field anyway.
       pool.query(
         `
         WITH per_customer AS (
@@ -348,24 +357,10 @@ export const sendDashboardEmail = async (
 
       // ── RSM / Region report — product-wise, EXCLUDING customer_type = 'D2R'.
       //
-      // Fixed to match salesController.ts's getRsmRegionReport exactly:
-      //   1. Target comes from the dedicated sales_targets table (joined via
-      //      brand_product_map), NOT from sales_current's *_target columns —
-      //      those don't carry the Distributor+B2B/D2R split this report
-      //      needs, so reading them directly here would silently produce
-      //      different numbers than the dashboard's RSM/Region report.
-      //   2. region / customer_type are normalized (letters only, lowercased)
-      //      on both sides before grouping/joining, since raw spelling in
-      //      sales_current and sales_targets doesn't always match exactly.
-      //   3. days_in_month is derived from the actual resolved date's month
-      //      (28/29/30/31) instead of a hardcoded 30 — a fixed divisor of 30
-      //      overstates the daily target rate in 31-day months and
-      //      understates it in February.
-      //   4. Every ROUND(...) argument is cast to ::numeric explicitly —
-      //      EXTRACT() returns double precision, and Postgres's 2-argument
-      //      ROUND(value, decimals) only exists for numeric, so leaving any
-      //      double precision in the expression throws
-      //      "function round(double precision, integer) does not exist".
+      // ach_today   = mtd_sales_sum / target_sum            (MTD sales vs full month target)
+      // avg_per_day = mtd_sales_sum / day_of_month           (per-day average sales so far)
+      // req_per_day = (target_sum - mtd_sales_sum) / (days_in_month - day_of_month)
+      //               (sales needed per remaining day to hit target)
       pool.query(
         `
         WITH product_unpivot AS (
@@ -452,9 +447,9 @@ export const sendDashboardEmail = async (
           s.mtd_sales_sum,
           ROUND((s.mtd_sales_sum / NULLIF(t.target_sum / p.days_in_month * p.day_of_month, 0))::numeric, 4) AS ach_mtd,
           s.yesterday_sum,
-          ROUND((s.yesterday_sum / NULLIF(t.target_sum / p.days_in_month, 0))::numeric, 4) AS ach_today,
-          ROUND(((t.target_sum - s.mtd_sales_sum) / NULLIF(p.days_in_month - p.day_of_month, 0))::numeric, 2) AS per_day_req,
-          ROUND((s.mtd_sales_sum / NULLIF(p.day_of_month, 0))::numeric, 2) AS reg_per_day
+          ROUND((s.mtd_sales_sum / NULLIF(t.target_sum, 0))::numeric, 4) AS ach_today,
+          ROUND((s.mtd_sales_sum / NULLIF(p.day_of_month, 0))::numeric, 2) AS avg_per_day,
+          ROUND(((t.target_sum - s.mtd_sales_sum) / NULLIF(p.days_in_month - p.day_of_month, 0))::numeric, 2) AS req_per_day
         FROM sales_agg s
         LEFT JOIN target_agg t ON t.product = s.product AND t.region_norm = s.region_norm
         CROSS JOIN params p
@@ -464,12 +459,7 @@ export const sendDashboardEmail = async (
       ),
 
       // ── RSM / Region report — D2R, treated as one combined "product".
-      //
-      // Same fix as the product query above: target comes from
-      // sales_targets (customer_type = 'D2R', brand = 'Total'), region is
-      // normalized on both sides, days_in_month is derived from the actual
-      // month instead of hardcoded 30, and every ROUND(...) argument is
-      // cast to ::numeric.
+      // Same three formulas as the product-wise query above.
       pool.query(
         `
         WITH totals AS (
@@ -509,9 +499,9 @@ export const sendDashboardEmail = async (
           t.mtd_sales_sum,
           ROUND((t.mtd_sales_sum / NULLIF(ta.target_sum / p.days_in_month * p.day_of_month, 0))::numeric, 4) AS ach_mtd,
           t.yesterday_sum,
-          ROUND((t.yesterday_sum / NULLIF(ta.target_sum / p.days_in_month, 0))::numeric, 4) AS ach_today,
-          ROUND(((ta.target_sum - t.mtd_sales_sum) / NULLIF(p.days_in_month - p.day_of_month, 0))::numeric, 2) AS per_day_req,
-          ROUND((t.mtd_sales_sum / NULLIF(p.day_of_month, 0))::numeric, 2) AS reg_per_day
+          ROUND((t.mtd_sales_sum / NULLIF(ta.target_sum, 0))::numeric, 4) AS ach_today,
+          ROUND((t.mtd_sales_sum / NULLIF(p.day_of_month, 0))::numeric, 2) AS avg_per_day,
+          ROUND(((ta.target_sum - t.mtd_sales_sum) / NULLIF(p.days_in_month - p.day_of_month, 0))::numeric, 2) AS req_per_day
         FROM totals t
         LEFT JOIN target_agg ta ON ta.region_norm = t.region_norm
         CROSS JOIN params p
@@ -524,29 +514,40 @@ export const sendDashboardEmail = async (
     // Process KPI
     const kpiRow = kpiResult.rows[0];
     const totalSales = Number(kpiRow.total_sales);
+    const activeCustomers = Number(
+      activeCustomersResult.rows[0].active_customers,
+    );
 
-    // Process products
+    // Avg per customer = total sales / ACTIVE customers (MTD sales > 0),
+    // not total customers — a customer with zero MTD sales shouldn't
+    // dilute the average. Replaces the SQL AVG(...) that kpiResult still
+    // computes (that column is now unused).
+    const avgPerCustomer = activeCustomers ? totalSales / activeCustomers : 0;
+
+    // Process products — fixed business order (not sorted by value).
     const pRow = productResult.rows[0];
-    const products = [
-      { name: "SuperCreate", value: Number(pRow.plc_mtd_sales) },
-      { name: "SuperCreate Plus+", value: Number(pRow.plc_plus_mtd_sales) },
-      { name: "Powercrete", value: Number(pRow.powercrete_mtd_sales) },
+    const productDefs = [
+      { name: "Supercrete", value: Number(pRow.plc_mtd_sales) },
+      { name: "Supercrete+", value: Number(pRow.plc_plus_mtd_sales) },
       { name: "Holcim", value: Number(pRow.pcc_opc_mtd_sales) },
-      { name: "HWP", value: Number(pRow.hwp_mtd_sales) },
-      { name: "HCG", value: Number(pRow.hcg_mtd_sales) },
-    ]
-      .sort((a, b) => b.value - a.value)
-      .map((p) => ({
-        ...p,
-        pct: totalSales ? (p.value / totalSales) * 100 : 0,
-      }));
+      { name: "Holcim Water Protect", value: Number(pRow.hwp_mtd_sales) },
+      { name: "Holcim Coastal Guard", value: Number(pRow.hcg_mtd_sales) },
+      { name: "Powercrete", value: Number(pRow.powercrete_mtd_sales) },
+    ];
+    const products = productDefs.map((p) => ({
+      ...p,
+      pct: totalSales ? (p.value / totalSales) * 100 : 0,
+    }));
 
     const ins = insightsResult.rows[0];
     const deepRow = deepInsightsResult.rows[0];
 
-    const sortedProducts = [...products];
-    const topProduct = sortedProducts[0];
-    const lowestProduct = sortedProducts[sortedProducts.length - 1];
+    // KPI "Top/Lowest Product" and insights still need the real max/min by
+    // value — `products` above is now in fixed display order, not value
+    // order, so re-sort a copy just for this.
+    const productsByValue = [...products].sort((a, b) => b.value - a.value);
+    const topProduct = productsByValue[0];
+    const lowestProduct = productsByValue[productsByValue.length - 1];
 
     const regionsSorted = regionResult.rows.sort(
       (a: any, b: any) => Number(b.total) - Number(a.total),
@@ -566,8 +567,9 @@ export const sendDashboardEmail = async (
     const kpi = {
       total_sales: totalSales,
       total_customers: Number(kpiRow.total_customers),
+      active_customers: activeCustomers,
       total_territories: Number(kpiRow.total_territories),
-      avg_per_customer: Number(kpiRow.avg_per_customer),
+      avg_per_customer: avgPerCustomer,
       top_region: {
         name: regionsSorted[0]?.region,
         value: Number(regionsSorted[0]?.total),
@@ -627,26 +629,22 @@ export const sendDashboardEmail = async (
       },
     };
 
-    // Process MTD vs Target
+    // Process MTD vs Target — fixed business order (not sorted by
+    // achievement %).
     const mtdPctOf = (numerator: number, denominator: number): number =>
       denominator ? Number(((numerator / denominator) * 100).toFixed(2)) : 0;
 
     const mtdRow = mtdTargetResult.rows[0];
     const mtdProducts = [
       {
-        name: "Supercreate",
+        name: "Supercrete",
         mtd_sales: Number(mtdRow.plc_mtd_sales),
         target: Number(mtdRow.plc_target),
       },
       {
-        name: "Supercreate+",
+        name: "Supercrete+",
         mtd_sales: Number(mtdRow.plc_plus_mtd_sales),
         target: Number(mtdRow.plc_plus_target),
-      },
-      {
-        name: "Powercrete",
-        mtd_sales: Number(mtdRow.powercrete_mtd_sales),
-        target: Number(mtdRow.powercrete_target),
       },
       {
         name: "Holcim",
@@ -654,14 +652,19 @@ export const sendDashboardEmail = async (
         target: Number(mtdRow.pcc_opc_target),
       },
       {
-        name: "HWP",
+        name: "Holcim Water Protect",
         mtd_sales: Number(mtdRow.hwp_mtd_sales),
         target: Number(mtdRow.hwp_target),
       },
       {
-        name: "HCG",
+        name: "Holcim Coastal Guard",
         mtd_sales: Number(mtdRow.hcg_mtd_sales),
         target: Number(mtdRow.hcg_target),
+      },
+      {
+        name: "Powercrete",
+        mtd_sales: Number(mtdRow.powercrete_mtd_sales),
+        target: Number(mtdRow.powercrete_target),
       },
     ].map((p) => ({ ...p, achievement_pct: mtdPctOf(p.mtd_sales, p.target) }));
 
@@ -672,11 +675,8 @@ export const sendDashboardEmail = async (
       total_mtd_sales: totalMtdSales,
       total_target: totalTarget,
       overall_achievement_pct: mtdPctOf(totalMtdSales, totalTarget),
-      // Worst achievement first — same convention as the dashboard's
-      // /api/sales/mtd-target-by-product endpoint.
-      data: [...mtdProducts].sort(
-        (a, b) => a.achievement_pct - b.achievement_pct,
-      ),
+      // Fixed business order — no longer sorted by achievement %.
+      data: mtdProducts,
     };
 
     // All areas — full list (no LIMIT), used for the "Area Performance"
@@ -710,7 +710,6 @@ export const sendDashboardEmail = async (
       HWP: { label: "HWP", colorKey: "HWP" },
       HCG: { label: "HCG", colorKey: "HCG" },
     };
-
     const rsmByProduct = Object.entries(RSM_PRODUCT_META).map(
       ([key, meta]) => ({
         product: meta.label,
@@ -727,8 +726,8 @@ export const sendDashboardEmail = async (
               ach_mtd: Number(r.ach_mtd),
               todays_sales: Number(r.yesterday_sum),
               ach_today: Number(r.ach_today),
-              per_day_req: Number(r.per_day_req),
-              reg_per_day: Number(r.reg_per_day),
+              avg_per_day: Number(r.avg_per_day),
+              req_per_day: Number(r.req_per_day),
             })),
         ),
       }),
@@ -749,8 +748,8 @@ export const sendDashboardEmail = async (
           ach_mtd: Number(r.ach_mtd),
           todays_sales: Number(r.yesterday_sum),
           ach_today: Number(r.ach_today),
-          per_day_req: Number(r.per_day_req),
-          reg_per_day: Number(r.reg_per_day),
+          avg_per_day: Number(r.avg_per_day),
+          req_per_day: Number(r.req_per_day),
         })),
       ),
     });
@@ -760,16 +759,20 @@ export const sendDashboardEmail = async (
       date,
       kpi,
       insights,
-      byRegion: regionResult.rows.map((r: any) => ({
-        region: r.region,
-        plc: Number(r.plc_mtd_sales),
-        plc_plus: Number(r.plc_plus_mtd_sales),
-        pow: Number(r.powercrete_mtd_sales),
-        holcim_ss: Number(r.pcc_opc_mtd_sales),
-        hwp: Number(r.hwp_mtd_sales),
-        hcg: Number(r.hcg_mtd_sales),
-        total: Number(r.total),
-      })),
+      // Fixed business order (REGION_ORDER), same convention as the
+      // RSM/Region tables — not sorted by total.
+      byRegion: sortByRegion(
+        regionResult.rows.map((r: any) => ({
+          region: r.region,
+          plc: Number(r.plc_mtd_sales),
+          plc_plus: Number(r.plc_plus_mtd_sales),
+          pow: Number(r.powercrete_mtd_sales),
+          holcim_ss: Number(r.pcc_opc_mtd_sales),
+          hwp: Number(r.hwp_mtd_sales),
+          hcg: Number(r.hcg_mtd_sales),
+          total: Number(r.total),
+        })),
+      ),
       byProduct: products,
       deepInsights,
       mtdTarget,
